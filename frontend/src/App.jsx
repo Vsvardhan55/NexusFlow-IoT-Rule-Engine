@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   ReactFlow, Background, Controls, MiniMap, Handle, Position,
   addEdge, useNodesState, useEdgesState, MarkerType
@@ -76,6 +76,100 @@ function AlertNode({ data, selected }) {
 }
 const nodeTypes = { sensorNode: SensorNode, filterNode: FilterNode, alertNode: AlertNode }
 
+function evaluateWorkflow(nodes, edges) {
+  const startedAt = new Date()
+  const incoming = new Map(nodes.map((node) => [node.id, 0]))
+  const outgoing = new Map(nodes.map((node) => [node.id, []]))
+  edges.forEach((edge) => {
+    if (incoming.has(edge.target) && outgoing.has(edge.source)) {
+      incoming.set(edge.target, incoming.get(edge.target) + 1)
+      outgoing.get(edge.source).push(edge.target)
+    }
+  })
+
+  const queue = nodes.filter((node) => incoming.get(node.id) === 0).map((node) => node.id)
+  const orderedIds = []
+  while (queue.length) {
+    const id = queue.shift()
+    orderedIds.push(id)
+    outgoing.get(id).forEach((targetId) => {
+      incoming.set(targetId, incoming.get(targetId) - 1)
+      if (incoming.get(targetId) === 0) queue.push(targetId)
+    })
+  }
+
+  const nodeById = new Map(nodes.map((node) => [node.id, node]))
+  const outputs = new Map()
+  const steps = orderedIds.map((id) => {
+    const node = nodeById.get(id)
+    const parents = edges.filter((edge) => edge.target === id).map((edge) => outputs.get(edge.source))
+    const inputValue = parents.length ? parents.find((value) => Number.isFinite(value)) : undefined
+    let outputValue = inputValue
+    let status = 'Completed'
+    let detail = 'Node executed successfully.'
+
+    if (node.type === 'sensorNode') {
+      const value = Number(node.data.metric)
+      outputValue = Number.isFinite(value) ? value : 0
+      detail = `Read ${outputValue} ${node.data.unit || 'units'} from ${node.data.label || 'sensor'}.`
+    } else if (node.type === 'filterNode') {
+      if (!Number.isFinite(inputValue)) {
+        status = 'Skipped'
+        detail = 'No numeric input received. Connect this node to a sensor source.'
+      } else {
+        outputValue = inputValue
+        detail = `Processed incoming value ${inputValue}. (Demo filter currently passes the value through.)`
+      }
+    } else if (node.type === 'alertNode') {
+      if (!Number.isFinite(inputValue)) {
+        status = 'Skipped'
+        detail = 'No numeric input received. Connect this action to a sensor or processing node.'
+      } else {
+        const condition = String(node.data.condition || 'Value > 100')
+        const match = condition.match(/(>=|<=|==|!=|>|<)\s*(-?\d+(?:\.\d+)?)/)
+        if (match) {
+          const threshold = Number(match[2])
+          const operator = match[1]
+          const triggered = operator === '>' ? inputValue > threshold
+            : operator === '>=' ? inputValue >= threshold
+              : operator === '<' ? inputValue < threshold
+                : operator === '<=' ? inputValue <= threshold
+                  : operator === '==' ? inputValue === threshold : inputValue !== threshold
+          status = triggered ? 'Triggered' : 'Completed'
+          detail = triggered
+            ? `Action triggered: ${inputValue} ${operator} ${threshold}.`
+            : `Condition not met: ${inputValue} is not ${operator} ${threshold}.`
+        } else {
+          status = 'Completed'
+          detail = `Action evaluated input value ${inputValue}; no supported threshold was configured.`
+        }
+        outputValue = inputValue
+      }
+    }
+
+    outputs.set(id, outputValue)
+    return { nodeId: id, nodeName: node.data.label || node.type, nodeType: node.type, status, input: Number.isFinite(inputValue) ? inputValue : null, output: Number.isFinite(outputValue) ? outputValue : null, detail }
+  })
+
+  const cyclicIds = nodes.filter((node) => !orderedIds.includes(node.id))
+  cyclicIds.forEach((node) => steps.push({
+    nodeId: node.id, nodeName: node.data.label || node.type, nodeType: node.type,
+    status: 'Failed', input: null, output: null,
+    detail: 'This node is part of a cycle or cannot be reached in the workflow graph.'
+  }))
+
+  const failed = steps.some((step) => step.status === 'Failed' || step.status === 'Skipped')
+  return {
+    id: `${startedAt.getTime()}-${Math.random().toString(36).slice(2, 7)}`,
+    workflowName: 'Workflow run',
+    startedAt: startedAt.toISOString(),
+    durationMs: Math.max(1, Date.now() - startedAt.getTime()),
+    status: failed ? 'Completed with warnings' : 'Completed',
+    steps,
+    triggeredCount: steps.filter((step) => step.status === 'Triggered').length,
+  }
+}
+
 function Sidebar() {
   return <aside className="sidebar">
     <div className="brand"><div className="brand-mark"><GitBranch size={20} /></div><div><b>NexusFlow</b><small>IoT RULE ENGINE</small></div></div>
@@ -101,12 +195,27 @@ function Sidebar() {
   </aside>
 }
 
+
+function ExecutionDetails({ record }) {
+  return <div className="execution-steps">
+    {record.steps.map((step, index) => <div className="execution-step" key={`${record.id}-${step.nodeId}-${index}`}>
+      <span className={`step-indicator ${step.status === 'Triggered' ? 'triggered' : step.status === 'Failed' || step.status === 'Skipped' ? 'failed' : ''}`}>{index + 1}</span>
+      <div className="step-content"><div className="step-title"><b>{step.nodeName}</b><span>{step.status}</span></div><p>{step.detail}</p></div>
+      <div className="step-value">{step.output === null ? '—' : step.output}</div>
+    </div>)}
+  </div>
+}
+
 function App() {
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const [activeTab, setActiveTab] = useState('Builder')
   const [selectedNode, setSelectedNode] = useState(null)
   const [running, setRunning] = useState(false)
+  const [executionHistory, setExecutionHistory] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('nexusflow-execution-history') || '[]') }
+    catch { return [] }
+  })
   const [toast, setToast] = useState('')
   const [workflowName, setWorkflowName] = useState('Turbine Vibration Monitor')
   const [showInspector, setShowInspector] = useState(true)
@@ -134,11 +243,45 @@ function App() {
     setToast('Workflow saved in this browser')
     setTimeout(() => setToast(''), 2500)
   }
+  const appendExecution = useCallback(() => {
+    const record = evaluateWorkflow(nodes, edges)
+    record.workflowName = workflowName
+    setExecutionHistory((current) => {
+      const updated = [record, ...current].slice(0, 50)
+      localStorage.setItem('nexusflow-execution-history', JSON.stringify(updated))
+      return updated
+    })
+  }, [nodes, edges, workflowName])
+
   const runWorkflow = () => {
-    setRunning((v) => !v)
-    setToast(running ? 'Workflow paused' : 'Workflow simulation started')
+    if (running) {
+      setRunning(false)
+      setToast('Workflow simulation stopped')
+    } else {
+      if (!nodes.length) {
+        setToast('Add at least one node before running the workflow')
+      } else {
+        appendExecution()
+        setRunning(true)
+        setToast('Workflow simulation started; execution recorded')
+      }
+    }
     setTimeout(() => setToast(''), 2500)
   }
+
+  useEffect(() => {
+    if (!running) return undefined
+    const timer = window.setInterval(() => {
+      const record = evaluateWorkflow(nodes, edges)
+      record.workflowName = workflowName
+      setExecutionHistory((current) => {
+        const updated = [record, ...current].slice(0, 50)
+        localStorage.setItem('nexusflow-execution-history', JSON.stringify(updated))
+        return updated
+      })
+    }, 3000)
+    return () => window.clearInterval(timer)
+  }, [running, nodes, edges, workflowName])
   const onNodeClick = (_, node) => { setSelectedNode(node); setShowInspector(true) }
   const chart = useMemo(() => chartData, [])
 
@@ -183,7 +326,19 @@ function App() {
             {selectedNode ? <div className="inspector-body"><div className="selected-type">SELECTED COMPONENT</div><h3>{selectedNode.data.label}</h3><p className="inspector-description">Configure the selected node and its processing behavior.</p><label>Node name</label><input className="field-input" value={selectedNode.data.label || ''} onChange={(e) => { const value = e.target.value; setNodes(ns => ns.map(n => n.id === selectedNode.id ? { ...n, data: { ...n.data, label: value } } : n)); setSelectedNode({ ...selectedNode, data: { ...selectedNode.data, label: value } }) }} /><label>Component ID</label><div className="read-only-field">{selectedNode.id}</div><label>Execution status</label><div className="status-field"><span className="tiny-dot green" /> Ready for execution</div><button className="delete-button" onClick={() => { setNodes(ns => ns.filter(n => n.id !== selectedNode.id)); setEdges(es => es.filter(e => e.source !== selectedNode.id && e.target !== selectedNode.id)); setSelectedNode(null) }}><Trash2 size={15} /> Remove node</button></div> : <div className="inspector-empty"><div className="empty-icon"><Cpu size={22} /></div><b>No node selected</b><p>Select a node on the canvas to view and edit its properties.</p><div className="tip-box"><Sparkles size={16} /><span><b>Quick tip</b> Connect nodes from left to right to define your data pipeline.</span></div></div>}
             <div className="inspector-footer"><ShieldCheck size={15} /> Changes are saved locally</div>
           </aside>}
-        </div> : <div className="alternate-panel"><div className="empty-icon"><Activity size={25} /></div><h3>{activeTab}</h3><p>{activeTab === 'Live Preview' ? 'Run the workflow simulation to preview telemetry and node execution.' : 'Execution records will appear here after workflow runs.'}</p><button className="primary-button" onClick={() => { setActiveTab('Builder'); runWorkflow() }}><Play size={15} /> {activeTab === 'Live Preview' ? 'Start simulation' : 'Back to builder'}</button></div>}
+        </div> : activeTab === 'Live Preview' ? <div className="execution-panel">
+          <div className="execution-panel-heading"><div><h3>Live workflow preview</h3><p>{running ? 'Simulation is running. A new execution is recorded every 3 seconds.' : 'Start the workflow to see node-by-node processing results.'}</p></div><span className={`execution-state ${running ? 'is-live' : ''}`}><i /> {running ? 'Running' : 'Stopped'}</span></div>
+          {executionHistory[0] ? <ExecutionDetails record={executionHistory[0]} /> : <div className="execution-empty"><Activity size={24} /><b>No preview data yet</b><span>Run the workflow to generate the first execution.</span></div>}
+          <button className="secondary-button" onClick={() => setActiveTab('Builder')}>Back to builder</button>
+        </div> : <div className="execution-panel">
+          <div className="execution-panel-heading"><div><h3>Execution History</h3><p>{executionHistory.length} recorded run{executionHistory.length === 1 ? '' : 's'} · saved in this browser</p></div><button className="text-button" onClick={() => { setExecutionHistory([]); localStorage.removeItem('nexusflow-execution-history') }}>Clear history</button></div>
+          {executionHistory.length ? <div className="history-list">{executionHistory.map((record) => <div className="history-card" key={record.id}>
+            <div className="history-card-top"><div><b>{record.workflowName}</b><small>{new Date(record.startedAt).toLocaleString()}</small></div><span className={`history-status ${record.status === 'Completed' ? 'success' : 'warning'}`}>{record.status}</span></div>
+            <div className="history-summary"><span>{record.steps.length} node steps</span><span>{record.triggeredCount} actions triggered</span><span>{record.durationMs} ms</span></div>
+            <ExecutionDetails record={record} />
+          </div>)}</div> : <div className="execution-empty"><Activity size={24} /><b>No executions recorded</b><span>Click Run workflow to execute your connected nodes and create a history record.</span></div>}
+          <button className="secondary-button" onClick={() => setActiveTab('Builder')}>Back to builder</button>
+        </div>}
         <section className="telemetry-section">
           <div className="telemetry-heading"><div><div className="eyebrow">REAL-TIME MONITORING</div><h2>Telemetry overview</h2></div><div className="time-filter">Last 20 minutes <ChevronDown size={14} /></div></div>
           <div className="metric-grid">
