@@ -191,7 +191,7 @@ Install the following tools before starting development:
 ### 1. Clone the Repository
 
 ```bash
-git clone YOUR_GITHUB_REPOSITORY_URL
+git clone https://github.com/Vsvardhan55/NexusFlow-IoT-Rule-Engine/tree/main
 ```
 
 ### 2. Navigate to the Project
