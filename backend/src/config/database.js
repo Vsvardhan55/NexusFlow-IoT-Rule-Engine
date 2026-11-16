@@ -11,9 +11,12 @@ export async function connectDatabase() {
   const existing = await database.listCollections({ name: 'telemetry' }).toArray()
   if (!existing.length) await database.createCollection('telemetry', { timeseries: { timeField: 'timestamp', metaField: 'metadata', granularity: 'seconds' } })
   await Promise.all([
+    database.collection('users').createIndex({ email: 1 }, { unique: true }),
     database.collection('telemetry').createIndex({ 'metadata.deviceId': 1, timestamp: -1 }),
     database.collection('rules').createIndex({ enabled: 1, 'condition.metric': 1 }),
     database.collection('alerts').createIndex({ triggeredAt: -1 }),
+    database.collection('workflows').createIndex({ active: 1, updatedAt: -1 }),
+    database.collection('workflowExecutions').createIndex({ workflowId: 1, startedAt: -1 }),
   ])
   console.log(`MongoDB connected: ${dbName}`)
   return database

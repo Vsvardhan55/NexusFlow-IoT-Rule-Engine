@@ -358,3 +358,71 @@ This project represents our effort to apply technical knowledge, strengthen deve
 **NexusFlow – Connecting Devices, Visualizing Intelligence, Automating Actions.**
 
 Developed as part of the Infotact Solutions Internship Program | November–December 2026.
+
+## 📡 Live Telemetry Dashboard Integration
+
+The dashboard subscribes to the backend Socket.IO server and displays real telemetry instead of fixed sample values.
+
+- `telemetry:batch` updates the incoming-reading counter.
+- `telemetry:average` updates the rolling-average metric, chart, sensor node, and processing node.
+- `alert:new` updates the recent-alert counter.
+- Initial event and alert totals are loaded from `GET /api/telemetry/stats` and `GET /api/alerts`.
+
+The frontend loads the Socket.IO browser client from the backend's `/socket.io/socket.io.js` endpoint, so no separate Socket.IO client dependency is required in the frontend package.
+
+For a non-default backend URL, create `frontend/.env` with:
+
+```env
+VITE_API_URL=http://localhost:5000
+```
+
+Start MongoDB, then start the backend and frontend in separate terminals. Send telemetry to `POST http://localhost:5000/api/telemetry` to populate the live dashboard. Example request body:
+
+```json
+{
+  "deviceId": "sensor-01",
+  "metric": "vibration",
+  "value": 42.8,
+  "unit": "mm/s"
+}
+```
+
+The moving-average chart remains empty until the backend emits actual telemetry averages; it no longer displays hard-coded sample readings.
+
+
+## Dynamic workflow execution (latest)
+
+The Rule Builder now compiles and saves workflows to MongoDB. Use **Run workflow** to activate the saved workflow for live telemetry. Active sensor → moving-average → alert plans execute on matching readings; each execution is stored and broadcast to the UI. Alert nodes currently produce in-app alerts only (no real SMS or webhook provider is configured). See `backend/README.md` for API routes and the telemetry payload example.
+
+## Authentication (Login & Registration)
+
+The application now includes email/password registration and login backed by MongoDB. Passwords are stored as salted scrypt hashes; the API issues signed HS256 access tokens that expire after seven days. Dashboard APIs (rules, alerts, workflows, and telemetry reads) require a Bearer token. The telemetry ingestion endpoint (`POST /api/telemetry`) remains available to device publishers, while Socket.IO dashboard connections require the same access token.
+
+### Configure authentication
+
+1. Copy `backend/.env.example` to `backend/.env`.
+2. Set `MONGODB_URI` and `MONGODB_DB` as usual.
+3. Replace `JWT_SECRET` with a unique random secret of at least 32 characters. Generate one with:
+
+   ```bash
+   node -e "console.log(require('crypto').randomBytes(48).toString('hex'))"
+   ```
+
+4. Start the backend and frontend. New users can choose **Create account** on the login screen; existing users can sign in.
+
+The browser stores the access token in local storage and sends it as a Bearer token. Signing out clears the local session. For production deployment, use HTTPS and consider moving access tokens to secure, HttpOnly cookies with CSRF protection. The current authentication establishes individual accounts, but project/workflow records are still in a shared workspace collection; per-user data isolation is a separate follow-up task.
+
+## Authentication troubleshooting
+
+The authentication endpoints are served by the **backend** process. If the frontend reports `POST /api/auth/register 404`, it is usually connected to an older backend process or a backend started from a different project folder.
+
+1. Stop any running backend terminal with `Ctrl+C`.
+2. Open a new terminal in this extracted project's `backend` directory (the directory containing `package.json`).
+3. Run `npm install`, then `npm run dev`.
+4. Confirm the backend terminal prints the authentication diagnostic URL.
+5. Open `http://localhost:5000/api/auth/health`. It should return JSON with `"status":"available"` and list the register/login endpoints.
+6. Keep that backend terminal running, then start the frontend in a separate terminal with `npm run dev` from `frontend`.
+
+If the health URL itself returns 404, port 5000 is still serving a different/older backend. Stop that process before retrying. On Windows, you can identify the process using `netstat -ano | findstr :5000` and stop the matching PID with `taskkill /PID <PID> /F`.
+
+The login and registration password field includes an eye button to show or hide the password. This only changes visibility in the form; passwords are still sent over the API request and stored as password hashes by the backend.

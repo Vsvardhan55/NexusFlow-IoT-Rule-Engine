@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import {
   ReactFlow, Background, Controls, MiniMap, Handle, Position,
   addEdge, useNodesState, useEdgesState, MarkerType
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import {
-  Activity, Bell, ChevronDown, CircleHelp, Cloud, Cpu, Database,
+  Activity, Bell, ChevronDown, CircleHelp, Cloud, Code2, Cpu, Database,
   Gauge, GitBranch, LayoutDashboard, Play, Plus, Radio, Save,
   Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
-  SquareTerminal, Zap, Clock3, CheckCircle2, X, Trash2
+  SquareTerminal, Zap, Clock3, CheckCircle2, X, Trash2, LogOut, Mail, LockKeyhole, UserRound, Eye, EyeOff
 } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis
@@ -26,20 +26,13 @@ const initialNodes = [
   },
   {
     id: 'alert-1', type: 'alertNode', position: { x: 710, y: 150 },
-    data: { label: 'SMS Alert', subtitle: 'Action trigger', condition: 'Value > 50 mm/s' }
+    data: { label: 'In-app Alert', subtitle: 'Action trigger', condition: 'Value > 50 mm/s' }
   },
 ]
 const initialEdges = [
   { id: 'e1-2', source: 'sensor-1', target: 'filter-1', animated: true, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed }, style: { stroke: '#7c8cff', strokeWidth: 2 } },
   { id: 'e2-3', source: 'filter-1', target: 'alert-1', animated: true, type: 'smoothstep', markerEnd: { type: MarkerType.ArrowClosed }, style: { stroke: '#7c8cff', strokeWidth: 2 } },
 ]
-const chartData = [
-  { time: '10:40', value: 29 }, { time: '10:42', value: 34 }, { time: '10:44', value: 31 },
-  { time: '10:46', value: 39 }, { time: '10:48', value: 36 }, { time: '10:50', value: 44 },
-  { time: '10:52', value: 41 }, { time: '10:54', value: 47 }, { time: '10:56', value: 43 },
-  { time: '10:58', value: 42.8 },
-]
-
 function NodeShell({ children, kind, icon: Icon, title, subtitle, selected }) {
   return <div className={`flow-node ${kind} ${selected ? 'selected' : ''}`}>
     <Handle type="target" position={Position.Left} />
@@ -64,154 +57,107 @@ function FilterNode({ data, selected }) {
   return <NodeShell kind="filter" icon={SlidersHorizontal} title="PROCESSING" subtitle={data.subtitle} selected={selected}>
     <strong>{data.label}</strong>
     <div className="node-config"><span>Window size</span><b>{data.window}</b></div>
-    <div className="node-foot"><span>Moving average</span><span>ƒ(x)</span></div>
+    <div className="node-foot"><span>Moving average</span><span>{Number.isFinite(data.latestAverage) ? data.latestAverage.toFixed(2) : 'Waiting'}</span></div>
   </NodeShell>
 }
 function AlertNode({ data, selected }) {
   return <NodeShell kind="alert" icon={Bell} title="ACTION" subtitle={data.subtitle} selected={selected}>
     <strong>{data.label}</strong>
     <div className="node-config"><span>Trigger when</span><b>{data.condition}</b></div>
-    <div className="node-foot"><span>SMS notification</span><span className="enabled-pill">Enabled</span></div>
+    <div className="node-foot"><span>In-app notification</span><span className="enabled-pill">Enabled</span></div>
   </NodeShell>
 }
 const nodeTypes = { sensorNode: SensorNode, filterNode: FilterNode, alertNode: AlertNode }
 
-function evaluateWorkflow(nodes, edges) {
-  const startedAt = new Date()
-  const incoming = new Map(nodes.map((node) => [node.id, 0]))
-  const outgoing = new Map(nodes.map((node) => [node.id, []]))
-  edges.forEach((edge) => {
-    if (incoming.has(edge.target) && outgoing.has(edge.source)) {
-      incoming.set(edge.target, incoming.get(edge.target) + 1)
-      outgoing.get(edge.source).push(edge.target)
-    }
-  })
-
-  const queue = nodes.filter((node) => incoming.get(node.id) === 0).map((node) => node.id)
-  const orderedIds = []
-  while (queue.length) {
-    const id = queue.shift()
-    orderedIds.push(id)
-    outgoing.get(id).forEach((targetId) => {
-      incoming.set(targetId, incoming.get(targetId) - 1)
-      if (incoming.get(targetId) === 0) queue.push(targetId)
-    })
-  }
-
-  const nodeById = new Map(nodes.map((node) => [node.id, node]))
-  const outputs = new Map()
-  const steps = orderedIds.map((id) => {
-    const node = nodeById.get(id)
-    const parents = edges.filter((edge) => edge.target === id).map((edge) => outputs.get(edge.source))
-    const inputValue = parents.length ? parents.find((value) => Number.isFinite(value)) : undefined
-    let outputValue = inputValue
-    let status = 'Completed'
-    let detail = 'Node executed successfully.'
-
-    if (node.type === 'sensorNode') {
-      const value = Number(node.data.metric)
-      outputValue = Number.isFinite(value) ? value : 0
-      detail = `Read ${outputValue} ${node.data.unit || 'units'} from ${node.data.label || 'sensor'}.`
-    } else if (node.type === 'filterNode') {
-      if (!Number.isFinite(inputValue)) {
-        status = 'Skipped'
-        detail = 'No numeric input received. Connect this node to a sensor source.'
-      } else {
-        outputValue = inputValue
-        detail = `Processed incoming value ${inputValue}. (Demo filter currently passes the value through.)`
-      }
-    } else if (node.type === 'alertNode') {
-      if (!Number.isFinite(inputValue)) {
-        status = 'Skipped'
-        detail = 'No numeric input received. Connect this action to a sensor or processing node.'
-      } else {
-        const condition = String(node.data.condition || 'Value > 100')
-        const match = condition.match(/(>=|<=|==|!=|>|<)\s*(-?\d+(?:\.\d+)?)/)
-        if (match) {
-          const threshold = Number(match[2])
-          const operator = match[1]
-          const triggered = operator === '>' ? inputValue > threshold
-            : operator === '>=' ? inputValue >= threshold
-              : operator === '<' ? inputValue < threshold
-                : operator === '<=' ? inputValue <= threshold
-                  : operator === '==' ? inputValue === threshold : inputValue !== threshold
-          status = triggered ? 'Triggered' : 'Completed'
-          detail = triggered
-            ? `Action triggered: ${inputValue} ${operator} ${threshold}.`
-            : `Condition not met: ${inputValue} is not ${operator} ${threshold}.`
-        } else {
-          status = 'Completed'
-          detail = `Action evaluated input value ${inputValue}; no supported threshold was configured.`
-        }
-        outputValue = inputValue
-      }
-    }
-
-    outputs.set(id, outputValue)
-    return { nodeId: id, nodeName: node.data.label || node.type, nodeType: node.type, status, input: Number.isFinite(inputValue) ? inputValue : null, output: Number.isFinite(outputValue) ? outputValue : null, detail }
-  })
-
-  const cyclicIds = nodes.filter((node) => !orderedIds.includes(node.id))
-  cyclicIds.forEach((node) => steps.push({
-    nodeId: node.id, nodeName: node.data.label || node.type, nodeType: node.type,
-    status: 'Failed', input: null, output: null,
-    detail: 'This node is part of a cycle or cannot be reached in the workflow graph.'
-  }))
-
-  const failed = steps.some((step) => step.status === 'Failed' || step.status === 'Skipped')
-  return {
-    id: `${startedAt.getTime()}-${Math.random().toString(36).slice(2, 7)}`,
-    workflowName: 'Workflow run',
-    startedAt: startedAt.toISOString(),
-    durationMs: Math.max(1, Date.now() - startedAt.getTime()),
-    status: failed ? 'Completed with warnings' : 'Completed',
-    steps,
-    triggeredCount: steps.filter((step) => step.status === 'Triggered').length,
-  }
+async function apiFetch(url, options = {}) {
+  const token = localStorage.getItem('nexusflow-token')
+  const headers = { ...(options.headers || {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) }
+  return fetch(url, { ...options, headers })
 }
 
-function Sidebar() {
+function AuthScreen({ onAuthenticated }) {
+  const [mode, setMode] = useState('login')
+  const [name, setName] = useState('')
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState('')
+  const submit = async (event) => {
+    event.preventDefault(); setError(''); setBusy(true)
+    try {
+      const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '')
+      let response
+      try {
+        response = await apiFetch(`${apiBase}/api/auth/${mode === 'login' ? 'login' : 'register'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) })
+      } catch {
+        throw new Error('Cannot reach the NexusFlow API. Start the backend from the project’s backend folder with npm run dev.')
+      }
+      const result = await response.json().catch(() => ({}))
+      if (response.status === 404) throw new Error('Authentication endpoint not found. Your backend is likely an older version or running from a different project folder. Stop it and restart the backend from this updated project.')
+      if (response.status === 409 && mode === 'register') throw new Error('An account with this email already exists. Switch to Sign in and use the same email and password.')
+      if (!response.ok || !result.success) throw new Error(result.message || `Unable to ${mode === 'login' ? 'sign in' : 'register'} (HTTP ${response.status}).`)
+      localStorage.setItem('nexusflow-token', result.data.token)
+      localStorage.setItem('nexusflow-user', JSON.stringify(result.data.user))
+      onAuthenticated(result.data.user)
+    } catch (err) { setError(err.message || 'Unable to connect to the server.') }
+    finally { setBusy(false) }
+  }
+  return <div className="auth-screen"><div className="auth-card"><div className="auth-brand"><span className="brand-mark"><Zap size={20}/></span><div><b>NexusFlow</b><small>VISUAL IOT PLATFORM</small></div></div><div className="auth-intro"><div className="eyebrow"><span className="eyebrow-dot"/> SECURE WORKSPACE</div><h1>{mode === 'login' ? 'Welcome back' : 'Create your account'}</h1><p>{mode === 'login' ? 'Sign in to continue building and monitoring your IoT workflows.' : 'Get started with your personal NexusFlow workspace.'}</p></div><form onSubmit={submit}>{mode === 'register' && <label className="auth-field"><span>Full name</span><div><UserRound size={17}/><input autoComplete="name" value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" required minLength={2}/></div></label>}<label className="auth-field"><span>Email address</span><div><Mail size={17}/><input type="email" autoComplete="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="you@example.com" required/></div></label><label className="auth-field"><span>Password</span><div><LockKeyhole size={17}/><input type={showPassword ? "text" : "password"} autoComplete={mode === 'login' ? 'current-password' : 'new-password'} value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 8 characters" required minLength={8}/><button className="password-toggle" type="button" onClick={()=>setShowPassword(value=>!value)} aria-label={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword}>{showPassword ? <EyeOff size={17}/> : <Eye size={17}/>}</button></div></label>{error && <div className="auth-error" role="alert">{error}</div>}<button className="auth-submit" disabled={busy}>{busy ? 'Please wait…' : mode === 'login' ? 'Sign in to NexusFlow' : 'Create account'}</button></form><div className="auth-switch">{mode === 'login' ? "Don't have an account?" : 'Already have an account?'} <button onClick={()=>{setMode(mode === 'login' ? 'register' : 'login');setError('')}}>{mode === 'login' ? 'Create account' : 'Sign in'}</button></div><div className="auth-security"><ShieldCheck size={15}/> Your workspace is protected with secure authentication.</div></div></div>
+}
+
+
+// Main application navigation. This component was referenced by App but was
+// missing from the previous archive, which caused the runtime ReferenceError.
+function Sidebar({ alertCount = 0, user = null }) {
+  const primaryItems = [
+    { label: 'Overview', icon: LayoutDashboard },
+    { label: 'Rule Builder', icon: GitBranch, active: true },
+    { label: 'Devices', icon: Radio },
+    { label: 'Telemetry', icon: Activity },
+    { label: 'Alerts', icon: Bell, count: alertCount },
+  ]
   return <aside className="sidebar">
-    <div className="brand"><div className="brand-mark"><GitBranch size={20} /></div><div><b>NexusFlow</b><small>IoT RULE ENGINE</small></div></div>
-    <div className="workspace-label">WORKSPACE <ChevronDown size={13} /></div>
-    <div className="workspace-card"><div className="workspace-avatar">N</div><div><b>Nexus Labs</b><small>Free workspace</small></div><ChevronDown size={15} /></div>
-    <div className="nav-section">GENERAL</div>
-    <nav className="side-nav">
-      <a><LayoutDashboard size={17} /> Overview</a>
-      <a className="active"><GitBranch size={17} /> Rule Builder <span className="nav-count">1</span></a>
-      <a><Activity size={17} /> Live Telemetry</a>
-      <a><Database size={17} /> Data Sources</a>
-      <a><Bell size={17} /> Alerts <span className="alert-count">3</span></a>
+    <div className="brand"><div className="brand-mark"><Zap size={19} /></div><div><b>NexusFlow</b><small>VISUAL IOT PLATFORM</small></div></div>
+    <div className="workspace-label">WORKSPACE <ChevronDown size={12} /></div>
+    <div className="workspace-card"><div className="workspace-avatar">N</div><div><b>NexusFlow Project</b><small>Personal workspace</small></div><ChevronDown size={14} /></div>
+    <div className="nav-section">BUILD & MONITOR</div>
+    <nav className="side-nav" aria-label="Main navigation">
+      {primaryItems.map(({ label, icon: Icon, active, count }) => <a key={label} href="#" className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={(event) => event.preventDefault()}>
+        <Icon size={16} /><span>{label}</span>{count > 0 && <span className="alert-count">{count > 99 ? '99+' : count}</span>}
+      </a>)}
     </nav>
-    <div className="nav-section lower">MANAGE</div>
-    <nav className="side-nav">
-      <a><SquareTerminal size={17} /> Event Logs</a>
-      <a><Settings2 size={17} /> Settings</a>
+    <div className="nav-section lower">CONFIGURATION</div>
+    <nav className="side-nav" aria-label="Configuration">
+      <a href="#" onClick={(event) => event.preventDefault()}><Database size={16} /><span>Data sources</span></a>
+      <a href="#" onClick={(event) => event.preventDefault()}><Settings2 size={16} /><span>Settings</span></a>
     </nav>
     <div className="sidebar-bottom">
-      <div className="usage-card"><div className="usage-title"><span>Monthly usage</span><b>68%</b></div><div className="usage-track"><span /></div><small>6,820 / 10,000 events</small></div>
-      <div className="profile"><div className="profile-avatar">SV</div><div><b>Sethu Vardhan</b><small>Administrator</small></div><ChevronDown size={15} /></div>
+      <div className="usage-card"><div className="usage-title"><span>Workspace usage</span><b>68%</b></div><div className="usage-track"><span /></div><small>Telemetry capacity used</small></div>
+      <div className="profile"><div className="profile-avatar">SV</div><div><b>{user?.name || 'Workspace member'}</b><small>{user?.email || 'Developer'}</small></div><Settings2 size={15} /></div>
     </div>
   </aside>
 }
 
-
 function ExecutionDetails({ record }) {
   return <div className="execution-steps">
-    {record.steps.map((step, index) => <div className="execution-step" key={`${record.id}-${step.nodeId}-${index}`}>
-      <span className={`step-indicator ${step.status === 'Triggered' ? 'triggered' : step.status === 'Failed' || step.status === 'Skipped' ? 'failed' : ''}`}>{index + 1}</span>
-      <div className="step-content"><div className="step-title"><b>{step.nodeName}</b><span>{step.status}</span></div><p>{step.detail}</p></div>
-      <div className="step-value">{step.output === null ? '—' : step.output}</div>
+    {(record.steps || []).map((step, index) => <div className="execution-step" key={`${step.nodeId}-${index}`}>
+      <span className={`step-indicator ${String(step.status).toLowerCase()}`} />
+      <div><b>{step.nodeId}</b><small>{step.detail || step.status}</small></div>
+      <span>{step.value == null ? '—' : Number(step.value).toFixed(2)}</span>
     </div>)}
   </div>
 }
 
 function App() {
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('nexusflow-token') || '')
+  const [currentUser, setCurrentUser] = useState(() => { try { return JSON.parse(localStorage.getItem('nexusflow-user') || 'null') } catch { return null } })
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const [activeTab, setActiveTab] = useState('Builder')
   const [selectedNode, setSelectedNode] = useState(null)
   const [running, setRunning] = useState(false)
+  const [deployedWorkflowId, setDeployedWorkflowId] = useState('')
   const [executionHistory, setExecutionHistory] = useState(() => {
     try { return JSON.parse(localStorage.getItem('nexusflow-execution-history') || '[]') }
     catch { return [] }
@@ -219,6 +165,11 @@ function App() {
   const [toast, setToast] = useState('')
   const [workflowName, setWorkflowName] = useState('Turbine Vibration Monitor')
   const [showInspector, setShowInspector] = useState(true)
+  const [socketStatus, setSocketStatus] = useState('connecting')
+  const [incomingEvents, setIncomingEvents] = useState(0)
+  const [recentAlerts, setRecentAlerts] = useState(0)
+  const [averageHistory, setAverageHistory] = useState([])
+  const [latestAverage, setLatestAverage] = useState(null)
 
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({
     ...params, type: 'smoothstep', animated: true,
@@ -243,59 +194,180 @@ function App() {
     setToast('Workflow saved in this browser')
     setTimeout(() => setToast(''), 2500)
   }
-  const appendExecution = useCallback(() => {
-    const record = evaluateWorkflow(nodes, edges)
-    record.workflowName = workflowName
-    setExecutionHistory((current) => {
-      const updated = [record, ...current].slice(0, 50)
-      localStorage.setItem('nexusflow-execution-history', JSON.stringify(updated))
-      return updated
-    })
-  }, [nodes, edges, workflowName])
 
-  const runWorkflow = () => {
-    if (running) {
-      setRunning(false)
-      setToast('Workflow simulation stopped')
-    } else {
-      if (!nodes.length) {
-        setToast('Add at least one node before running the workflow')
-      } else {
-        appendExecution()
-        setRunning(true)
-        setToast('Workflow simulation started; execution recorded')
-      }
+  const compileWorkflow = async () => {
+    try {
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+      const response = await apiFetch(`${apiBase}/api/workflows`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: workflowName, nodes, edges }),
+      })
+      const result = await response.json()
+      if (!response.ok || !result.success) throw new Error(result.message || 'Workflow compilation failed.')
+      setDeployedWorkflowId(result.data._id)
+      localStorage.setItem('nexusflow-compiled-plan', JSON.stringify(result.data.compiled))
+      setToast(`Compiled and saved: ${result.data.compiled.nodeCount} nodes · Ready to activate`)
+    } catch (error) {
+      setToast(error.message || 'Could not reach the compiler API. Is the backend running?')
     }
-    setTimeout(() => setToast(''), 2500)
+    window.setTimeout(() => setToast(''), 3500)
+  }
+  const runWorkflow = async () => {
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    try {
+      if (running) {
+        if (deployedWorkflowId) {
+          const response = await apiFetch(`${apiBase}/api/workflows/${deployedWorkflowId}/deactivate`, { method: 'POST' })
+          const result = await response.json()
+          if (!response.ok || !result.success) throw new Error(result.message || 'Could not deactivate workflow.')
+        }
+        setRunning(false)
+        setToast('Live workflow deactivated')
+      } else {
+        if (!deployedWorkflowId) {
+          setToast('Compile the workflow first to save it to the backend')
+          return
+        }
+        const response = await apiFetch(`${apiBase}/api/workflows/${deployedWorkflowId}/activate`, { method: 'POST' })
+        const result = await response.json()
+        if (!response.ok || !result.success) throw new Error(result.message || 'Could not activate workflow.')
+        setRunning(true)
+        setToast('Workflow is active and processing live telemetry')
+      }
+    } catch (error) {
+      setToast(error.message || 'Workflow action failed. Check the backend connection.')
+    }
+    window.setTimeout(() => setToast(''), 3000)
   }
 
   useEffect(() => {
-    if (!running) return undefined
-    const timer = window.setInterval(() => {
-      const record = evaluateWorkflow(nodes, edges)
-      record.workflowName = workflowName
-      setExecutionHistory((current) => {
-        const updated = [record, ...current].slice(0, 50)
-        localStorage.setItem('nexusflow-execution-history', JSON.stringify(updated))
-        return updated
+    if (!authToken) return undefined
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    let disposed = false
+    let socket
+    let script
+    const attach = () => {
+      if (disposed || typeof window.io !== 'function') return
+      socket = window.io(apiBase, { auth: { token: authToken }, transports: ['websocket', 'polling'], reconnection: true })
+      socket.on('workflow:execution', (execution) => {
+        if (disposed) return
+        setExecutionHistory((current) => {
+          const record = {
+            id: execution._id,
+            workflowName: execution.workflowName,
+            startedAt: execution.startedAt,
+            status: execution.status === 'triggered' ? 'Triggered' : 'Completed',
+            triggeredCount: (execution.triggeredAlerts || []).length,
+            durationMs: Math.max(0, new Date(execution.completedAt).getTime() - new Date(execution.startedAt).getTime()),
+            steps: (execution.nodeResults || []).map((step) => ({
+              nodeId: step.nodeId,
+              status: step.status === 'triggered' ? 'Triggered' : step.status === 'skipped' ? 'Skipped' : 'Completed',
+              detail: step.detail,
+              value: step.value,
+            })),
+          }
+          const updated = [record, ...current].slice(0, 50)
+          localStorage.setItem('nexusflow-execution-history', JSON.stringify(updated))
+          return updated
+        })
       })
-    }, 3000)
-    return () => window.clearInterval(timer)
-  }, [running, nodes, edges, workflowName])
-  const onNodeClick = (_, node) => { setSelectedNode(node); setShowInspector(true) }
-  const chart = useMemo(() => chartData, [])
+    }
+    if (typeof window.io === 'function') attach()
+    else {
+      script = document.createElement('script')
+      script.src = `${apiBase}/socket.io/socket.io.js`
+      script.async = true
+      script.onload = attach
+      document.head.appendChild(script)
+    }
+    return () => { disposed = true; if (socket) socket.disconnect(); if (script?.parentNode) script.parentNode.removeChild(script) }
+  }, [authToken])
 
+  const onNodeClick = (_, node) => { setSelectedNode(node); setShowInspector(true) }
+
+  // Connect the dashboard to the backend's real Socket.IO telemetry stream.
+  useEffect(() => {
+    if (!authToken) return undefined
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    let socket
+    let script
+    let disposed = false
+
+    apiFetch(`${apiBase}/api/telemetry/stats`)
+      .then((response) => { if (!response.ok) throw new Error('Unable to load telemetry stats'); return response.json() })
+      .then((result) => { if (!disposed && result.success) setIncomingEvents((count) => Math.max(count, result.data.totalReadings || 0)) })
+      .catch(() => { if (!disposed) setSocketStatus('disconnected') })
+
+    apiFetch(`${apiBase}/api/alerts?limit=200`)
+      .then((response) => response.json())
+      .then((result) => { if (!disposed && result.success) setRecentAlerts((count) => Math.max(count, result.count || 0)) })
+      .catch(() => {})
+
+    const connectSocket = () => {
+      if (disposed || typeof window.io !== 'function') return
+      socket = window.io(apiBase, { auth: { token: authToken }, transports: ['websocket', 'polling'], reconnection: true })
+      socket.on('connect', () => { if (!disposed) setSocketStatus('connected') })
+      socket.on('disconnect', () => { if (!disposed) setSocketStatus('disconnected') })
+      socket.on('connect_error', () => { if (!disposed) setSocketStatus('disconnected') })
+      socket.on('telemetry:batch', (payload) => {
+        if (!disposed && Number.isFinite(payload?.count)) setIncomingEvents((count) => count + payload.count)
+      })
+      socket.on('telemetry:average', (result) => {
+        if (disposed || !Number.isFinite(Number(result?.average))) return
+        const point = {
+          time: new Date(result.timestamp || result.calculatedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+          value: Number(result.average),
+          deviceId: result.deviceId,
+          metric: result.metric,
+          unit: result.unit || '',
+          sampleCount: result.sampleCount,
+        }
+        setLatestAverage(point)
+        setAverageHistory((history) => [...history, point].slice(-20))
+        setNodes((current) => current.map((node) => {
+          if (node.type === 'sensorNode' && String(node.data.subtitle || '').includes(result.deviceId)) {
+            return { ...node, data: { ...node.data, metric: point.value.toFixed(2), status: 'Connected' } }
+          }
+          if (node.type === 'filterNode') return { ...node, data: { ...node.data, latestAverage: point.value } }
+          return node
+        }))
+      })
+      socket.on('alert:new', () => { if (!disposed) setRecentAlerts((count) => count + 1) })
+    }
+
+    if (typeof window.io === 'function') {
+      connectSocket()
+    } else {
+      script = document.createElement('script')
+      script.src = `${apiBase}/socket.io/socket.io.js`
+      script.async = true
+      script.onload = connectSocket
+      script.onerror = () => { if (!disposed) setSocketStatus('disconnected') }
+      document.head.appendChild(script)
+    }
+
+    return () => {
+      disposed = true
+      if (socket) socket.disconnect()
+      if (script?.parentNode) script.parentNode.removeChild(script)
+    }
+  }, [setNodes, authToken])
+
+  if (!authToken) return <AuthScreen onAuthenticated={(user) => { setCurrentUser(user); setAuthToken(localStorage.getItem('nexusflow-token') || '') }} />
+
+  const signOut = () => { localStorage.removeItem('nexusflow-token'); localStorage.removeItem('nexusflow-user'); setAuthToken(''); setCurrentUser(null) }
   return <div className="app-shell">
-    <Sidebar />
+    <Sidebar alertCount={recentAlerts} user={currentUser} />
     <main className="main-area">
       <header className="topbar">
         <div className="breadcrumb">Projects <span>/</span> <b>Rule Builder</b></div>
-        <div className="top-actions"><span className="system-status"><i /> All systems operational</span><button className="icon-button"><CircleHelp size={18} /></button><button className="icon-button"><Bell size={18} /><i className="notification-dot" /></button><div className="top-avatar">SV</div></div>
+        <div className="top-actions"><span className={`system-status ${socketStatus === 'connected' ? '' : 'system-status-offline'}`}><i /> {socketStatus === 'connected' ? 'Live telemetry connected' : socketStatus === 'connecting' ? 'Connecting telemetry…' : 'Telemetry disconnected'}</span><button className="icon-button"><CircleHelp size={18} /></button><button className="icon-button"><Bell size={18} /><i className="notification-dot" /></button><button className="top-avatar logout-button" title={`Sign out${currentUser?.name ? ` ${currentUser.name}` : ''}`} onClick={signOut}><LogOut size={15}/></button></div>
       </header>
       <section className="page-content">
         <div className="page-heading">
           <div><div className="eyebrow"><span className="eyebrow-dot" /> VISUAL AUTOMATION</div><h1>Rule Builder</h1><p>Design, connect, and deploy intelligent IoT workflows.</p></div>
-          <div className="heading-actions"><button className="secondary-button" onClick={saveWorkflow}><Save size={16} /> Save draft</button><button className={`primary-button ${running ? 'is-running' : ''}`} onClick={runWorkflow}>{running ? <><Activity size={16} /> Stop simulation</> : <><Play size={16} fill="currentColor" /> Run workflow</>}</button></div>
+          <div className="heading-actions"><button className="secondary-button" onClick={saveWorkflow}><Save size={16} /> Save draft</button><button className="secondary-button" onClick={compileWorkflow}><Code2 size={16} /> Compile</button><button className={`primary-button ${running ? 'is-running' : ''}`} onClick={runWorkflow}>{running ? <><Activity size={16} /> Stop simulation</> : <><Play size={16} fill="currentColor" /> Run workflow</>}</button></div>
         </div>
         <div className="project-strip">
           <div className="project-title"><div className="project-icon"><Zap size={18} /></div><div><span>WORKFLOW NAME</span><input value={workflowName} onChange={(e) => setWorkflowName(e.target.value)} /></div><span className="draft-tag">DRAFT</span></div>
@@ -327,8 +399,8 @@ function App() {
             <div className="inspector-footer"><ShieldCheck size={15} /> Changes are saved locally</div>
           </aside>}
         </div> : activeTab === 'Live Preview' ? <div className="execution-panel">
-          <div className="execution-panel-heading"><div><h3>Live workflow preview</h3><p>{running ? 'Simulation is running. A new execution is recorded every 3 seconds.' : 'Start the workflow to see node-by-node processing results.'}</p></div><span className={`execution-state ${running ? 'is-live' : ''}`}><i /> {running ? 'Running' : 'Stopped'}</span></div>
-          {executionHistory[0] ? <ExecutionDetails record={executionHistory[0]} /> : <div className="execution-empty"><Activity size={24} /><b>No preview data yet</b><span>Run the workflow to generate the first execution.</span></div>}
+          <div className="execution-panel-heading"><div><h3>Live workflow preview</h3><p>{running ? 'Live workflow is listening for matching sensor telemetry.' : 'Compile and activate the workflow to process incoming telemetry.'}</p></div><span className={`execution-state ${running ? 'is-live' : ''}`}><i /> {running ? 'Running' : 'Stopped'}</span></div>
+          {executionHistory[0] ? <ExecutionDetails record={executionHistory[0]} /> : <div className="execution-empty"><Activity size={24} /><b>No preview data yet</b><span>Execution details appear when matching telemetry reaches the active workflow.</span></div>}
           <button className="secondary-button" onClick={() => setActiveTab('Builder')}>Back to builder</button>
         </div> : <div className="execution-panel">
           <div className="execution-panel-heading"><div><h3>Execution History</h3><p>{executionHistory.length} recorded run{executionHistory.length === 1 ? '' : 's'} · saved in this browser</p></div><button className="text-button" onClick={() => { setExecutionHistory([]); localStorage.removeItem('nexusflow-execution-history') }}>Clear history</button></div>
@@ -336,20 +408,20 @@ function App() {
             <div className="history-card-top"><div><b>{record.workflowName}</b><small>{new Date(record.startedAt).toLocaleString()}</small></div><span className={`history-status ${record.status === 'Completed' ? 'success' : 'warning'}`}>{record.status}</span></div>
             <div className="history-summary"><span>{record.steps.length} node steps</span><span>{record.triggeredCount} actions triggered</span><span>{record.durationMs} ms</span></div>
             <ExecutionDetails record={record} />
-          </div>)}</div> : <div className="execution-empty"><Activity size={24} /><b>No executions recorded</b><span>Click Run workflow to execute your connected nodes and create a history record.</span></div>}
+          </div>)}</div> : <div className="execution-empty"><Activity size={24} /><b>No executions recorded</b><span>Compile, activate, then send matching telemetry to create execution records.</span></div>}
           <button className="secondary-button" onClick={() => setActiveTab('Builder')}>Back to builder</button>
         </div>}
         <section className="telemetry-section">
           <div className="telemetry-heading"><div><div className="eyebrow">REAL-TIME MONITORING</div><h2>Telemetry overview</h2></div><div className="time-filter">Last 20 minutes <ChevronDown size={14} /></div></div>
           <div className="metric-grid">
-            <div className="metric-card"><div className="metric-top"><span>Incoming events</span><span className="metric-icon blue"><Activity size={16} /></span></div><div className="metric-value">12,840 <small className="positive">↗ 12.8%</small></div><p>Compared to previous period</p></div>
-            <div className="metric-card"><div className="metric-top"><span>Avg. processing time</span><span className="metric-icon purple"><Gauge size={16} /></span></div><div className="metric-value">24 <small>ms</small></div><p><span className="positive">↓ 4.2%</span> faster than average</p></div>
-            <div className="metric-card"><div className="metric-top"><span>Active connections</span><span className="metric-icon green"><Cloud size={16} /></span></div><div className="metric-value">08 <small>/ 10</small></div><p>All devices responding</p></div>
-            <div className="metric-card"><div className="metric-top"><span>Triggered alerts</span><span className="metric-icon orange"><Bell size={16} /></span></div><div className="metric-value">03 <small className="neutral">today</small></div><p>1 alert requires attention</p></div>
+            <div className="metric-card"><div className="metric-top"><span>Incoming events</span><span className="metric-icon blue"><Activity size={16} /></span></div><div className="metric-value">{incomingEvents.toLocaleString()}</div><p>Stored telemetry readings</p></div>
+            <div className="metric-card"><div className="metric-top"><span>Moving average</span><span className="metric-icon purple"><Gauge size={16} /></span></div><div className="metric-value">{latestAverage ? latestAverage.value.toFixed(2) : '—'} <small>{latestAverage?.unit || 'units'}</small></div><p>{latestAverage ? `${latestAverage.sampleCount} sample${latestAverage.sampleCount === 1 ? '' : 's'} in current window` : 'Waiting for telemetry stream'}</p></div>
+            <div className="metric-card"><div className="metric-top"><span>Socket connection</span><span className="metric-icon green"><Cloud size={16} /></span></div><div className="metric-value">{socketStatus === 'connected' ? 'Online' : socketStatus === 'connecting' ? '…' : 'Offline'}</div><p>Backend real-time channel</p></div>
+            <div className="metric-card"><div className="metric-top"><span>Recent alerts</span><span className="metric-icon orange"><Bell size={16} /></span></div><div className="metric-value">{recentAlerts.toLocaleString()}</div><p>Alerts returned by the API + live events</p></div>
           </div>
-          <div className="chart-card"><div className="chart-header"><div><b>Sensor activity</b><p>Vibration readings over time</p></div><div className="chart-legend"><span><i /> Vibration (mm/s)</span><b>42.8 <small>mm/s</small></b></div></div><div className="chart-wrap"><ResponsiveContainer width="100%" height="100%"><AreaChart data={chart}><defs><linearGradient id="vibrationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7888f6" stopOpacity={0.22}/><stop offset="100%" stopColor="#7888f6" stopOpacity={0.01}/></linearGradient></defs><CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#edf0f6"/><XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }}/><YAxis axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }} width={34}/><Tooltip contentStyle={{ border: '1px solid #e9edf5', borderRadius: 10, fontSize: 12 }}/><Area type="monotone" dataKey="value" stroke="#7888f6" strokeWidth={2.5} fill="url(#vibrationFill)" /></AreaChart></ResponsiveContainer></div></div>
+          <div className="chart-card"><div className="chart-header"><div><b>Live moving average</b><p>RxJS rolling average received from the backend</p></div><div className="chart-legend"><span><i /> {latestAverage?.metric || 'Sensor metric'}</span><b>{latestAverage ? latestAverage.value.toFixed(2) : '—'} <small>{latestAverage?.unit || 'units'}</small></b></div></div><div className="chart-wrap">{averageHistory.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={averageHistory}><defs><linearGradient id="vibrationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7888f6" stopOpacity={0.22}/><stop offset="100%" stopColor="#7888f6" stopOpacity={0.01}/></linearGradient></defs><CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#edf0f6"/><XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }}/><YAxis axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }} width={42}/><Tooltip contentStyle={{ border: '1px solid #e9edf5', borderRadius: 10, fontSize: 12 }}/><Area type="monotone" dataKey="value" stroke="#7888f6" strokeWidth={2.5} fill="url(#vibrationFill)" /></AreaChart></ResponsiveContainer> : <div className="execution-empty"><Activity size={22}/><b>Waiting for live telemetry</b><span>Post a reading to POST /api/telemetry to see its moving average here.</span></div>}</div></div>
         </section>
-        <footer className="footer"><span>© 2026 NexusFlow · IoT Rule Engine</span><span><i /> API operational <span className="footer-sep">·</span> v0.1.0</span></footer>
+        <footer className="footer"><span>© 2026 NexusFlow · IoT Rule Engine</span><span><i /> API {socketStatus === 'connected' ? 'connected' : 'not connected'} <span className="footer-sep">·</span> v0.2.0</span></footer>
       </section>
     </main>
     {toast && <div className="toast"><CheckCircle2 size={17} />{toast}</div>}

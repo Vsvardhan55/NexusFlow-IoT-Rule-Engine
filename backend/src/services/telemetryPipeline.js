@@ -1,12 +1,15 @@
 import { Subject, bufferTime, filter, map } from 'rxjs'
+import { createMovingAverageStream } from './movingAverage.js'
 import { getDatabase } from '../config/database.js'
 import { matchesRule } from './ruleEngine.js'
+import { executeActiveWorkflows } from './workflowExecution.js'
 
 export const telemetrySubject = new Subject()
 
 export function startTelemetryPipeline(io) {
   const subscription = telemetrySubject.subscribe(async (reading) => {
     try {
+      await executeActiveWorkflows(reading, io)
       const rules = await getDatabase().collection('rules').find({ enabled: true, 'condition.metric': reading.metadata.metric }).toArray()
       const matched = rules.filter((rule) => matchesRule(rule, reading))
       if (!matched.length) return
@@ -27,10 +30,14 @@ export function startTelemetryPipeline(io) {
     }
   })
 
+  const configuredWindow = Number(process.env.MOVING_AVERAGE_WINDOW) || 10
+  const averageSubscription = createMovingAverageStream(telemetrySubject, configuredWindow)
+    .subscribe((result) => io.emit('telemetry:average', result))
+
   const batchSubscription = telemetrySubject.pipe(
     bufferTime(250), filter((batch) => batch.length > 0),
     map((batch) => ({ type: 'telemetry:batch', count: batch.length, events: batch, emittedAt: new Date().toISOString() })),
   ).subscribe((payload) => io.emit('telemetry:batch', payload))
 
-  return () => { subscription.unsubscribe(); batchSubscription.unsubscribe(); telemetrySubject.complete() }
+  return () => { subscription.unsubscribe(); averageSubscription.unsubscribe(); batchSubscription.unsubscribe(); telemetrySubject.complete() }
 }

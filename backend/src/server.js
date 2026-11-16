@@ -7,6 +7,10 @@ import { connectDatabase, closeDatabase, getDatabase } from './config/database.j
 import telemetryRoutes from './routes/telemetry.routes.js'
 import ruleRoutes from './routes/rule.routes.js'
 import alertRoutes from './routes/alert.routes.js'
+import workflowRoutes from './routes/workflow.routes.js'
+import authRoutes from './routes/auth.routes.js'
+import { requireAuth } from './middleware/auth.middleware.js'
+import { assertAuthConfiguration, verifyToken } from './services/auth.js'
 import { startTelemetryPipeline } from './services/telemetryPipeline.js'
 
 const app = express()
@@ -41,15 +45,19 @@ app.get('/api/health', async (_req, res) => {
   try { await getDatabase().command({ ping: 1 }); res.json({ success: true, service: 'NexusFlow API', status: 'healthy', database: 'connected', timestamp: new Date().toISOString() }) }
   catch { res.status(503).json({ success: false, service: 'NexusFlow API', status: 'unavailable', database: 'disconnected' }) }
 })
-app.use('/api/telemetry', telemetryRoutes)
-app.use('/api/rules', ruleRoutes)
-app.use('/api/alerts', alertRoutes)
+app.use('/api/auth', authRoutes)
+// Sensor ingestion remains available for device publishers; dashboard reads require a session.
+app.use('/api/telemetry', (req, res, next) => req.method === 'POST' ? next() : requireAuth(req, res, next), telemetryRoutes)
+app.use('/api/rules', requireAuth, ruleRoutes)
+app.use('/api/alerts', requireAuth, alertRoutes)
+app.use('/api/workflows', requireAuth, workflowRoutes)
 app.use((_req, res) => res.status(404).json({ success: false, message: 'Route not found.' }))
 app.use((error, _req, res, _next) => { console.error(error); res.status(500).json({ success: false, message: process.env.NODE_ENV === 'production' ? 'Internal server error.' : error.message }) })
-io.on('connection', (socket) => { console.log(`Socket connected: ${socket.id}`); socket.on('disconnect', () => console.log(`Socket disconnected: ${socket.id}`)) })
+io.use((socket, next) => { try { socket.user = verifyToken(socket.handshake.auth?.token); next() } catch { next(new Error('Unauthorized socket connection.')) } })
+io.on('connection', (socket) => { console.log(`Authenticated socket connected: ${socket.id}`); socket.on('disconnect', () => console.log(`Socket disconnected: ${socket.id}`)) })
 const stopPipeline = startTelemetryPipeline(io)
 const port = Number(process.env.PORT) || 5000
-try { await connectDatabase(); httpServer.listen(port, () => console.log(`NexusFlow API listening on http://localhost:${port}`)) }
+try { assertAuthConfiguration(); await connectDatabase(); httpServer.listen(port, () => { console.log(`NexusFlow API listening on http://localhost:${port}`); console.log(`Authentication routes: http://localhost:${port}/api/auth/health`) }) }
 catch (error) { console.error('Failed to start NexusFlow backend:', error.message); process.exit(1) }
 let shuttingDown = false
 async function shutdown() {
