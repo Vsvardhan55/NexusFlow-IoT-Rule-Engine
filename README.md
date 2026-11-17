@@ -426,3 +426,10 @@ The authentication endpoints are served by the **backend** process. If the front
 If the health URL itself returns 404, port 5000 is still serving a different/older backend. Stop that process before retrying. On Windows, you can identify the process using `netstat -ano | findstr :5000` and stop the matching PID with `taskkill /PID <PID> /F`.
 
 The login and registration password field includes an eye button to show or hide the password. This only changes visibility in the form; passwords are still sent over the API request and stored as password hashes by the backend.
+
+
+## Work update — 17 November 2026
+
+- Added explicit `metricName` and `deviceId` properties to the default and newly created Sensor nodes.
+- Updated frontend ESLint configuration with `eslint-plugin-react` and the JSX variable-usage rule.
+- Local verification: frontend lint and production build passed. Vite still reports a non-fatal large-chunk advisory; see `TODAYS_WORK_17_NOV_2026.md`.

@@ -8,7 +8,7 @@ import {
   Activity, Bell, ChevronDown, CircleHelp, Cloud, Code2, Cpu, Database,
   Gauge, GitBranch, LayoutDashboard, Play, Plus, Radio, Save,
   Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
-  SquareTerminal, Zap, Clock3, CheckCircle2, X, Trash2, LogOut, Mail, LockKeyhole, UserRound, Eye, EyeOff
+  Zap, Clock3, CheckCircle2, X, Trash2, LogOut, Mail, LockKeyhole, UserRound, Eye, EyeOff
 } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis
@@ -18,7 +18,7 @@ import './App.css'
 const initialNodes = [
   {
     id: 'sensor-1', type: 'sensorNode', position: { x: 80, y: 150 },
-    data: { label: 'Turbine Sensor', subtitle: 'Vibration · sensor-01', metric: '42.8', unit: 'mm/s', status: 'Connected' }
+    data: { label: 'Turbine Sensor', subtitle: 'Vibration · sensor-01', metric: '42.8', metricName: 'vibration', deviceId: 'sensor-01', unit: 'mm/s', status: 'Connected' }
   },
   {
     id: 'filter-1', type: 'filterNode', position: { x: 390, y: 150 },
@@ -179,7 +179,7 @@ function App() {
 
   const addNode = (type) => {
     const config = {
-      sensorNode: { label: 'New Sensor', subtitle: 'Telemetry · sensor-new', metric: '0.0', unit: 'units', status: 'Waiting' },
+      sensorNode: { label: 'New Sensor', subtitle: 'Telemetry · sensor-new', metric: '0.0', metricName: 'vibration', deviceId: 'sensor-new', unit: 'units', status: 'Waiting' },
       filterNode: { label: 'Threshold Filter', subtitle: 'Signal processing', window: '5 samples' },
       alertNode: { label: 'Webhook Action', subtitle: 'Action trigger', condition: 'Value > 100' },
     }
