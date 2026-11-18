@@ -24,6 +24,7 @@ export function createMovingAverageStream(readings$, windowSize = 10) {
         deviceId: latest.metadata?.deviceId ?? 'unknown',
         metric: latest.metadata?.metric ?? 'value',
         average: sum / values.length,
+        rawValue: Number(latest.value),
         sampleCount: values.length,
         windowSize: size,
         unit: latest.unit || '',

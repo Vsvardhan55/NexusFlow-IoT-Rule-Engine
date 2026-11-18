@@ -11,7 +11,7 @@ import {
   Zap, Clock3, CheckCircle2, X, Trash2, LogOut, Mail, LockKeyhole, UserRound, Eye, EyeOff
 } from 'lucide-react'
 import {
-  Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis
+  Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis
 } from 'recharts'
 import './App.css'
 
@@ -286,6 +286,15 @@ function App() {
 
   const onNodeClick = (_, node) => { setSelectedNode(node); setShowInspector(true) }
 
+  // Keep the selected-node snapshot and React Flow graph in sync while editing.
+  const updateSelectedNode = (patch) => {
+    if (!selectedNode) return
+    setNodes((current) => current.map((node) => node.id === selectedNode.id
+      ? { ...node, data: { ...node.data, ...patch } }
+      : node))
+    setSelectedNode((current) => current ? { ...current, data: { ...current.data, ...patch } } : current)
+  }
+
   // Connect the dashboard to the backend's real Socket.IO telemetry stream.
   useEffect(() => {
     if (!authToken) return undefined
@@ -318,6 +327,7 @@ function App() {
         const point = {
           time: new Date(result.timestamp || result.calculatedAt || Date.now()).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
           value: Number(result.average),
+          rawValue: Number.isFinite(Number(result.rawValue)) ? Number(result.rawValue) : Number(result.average),
           deviceId: result.deviceId,
           metric: result.metric,
           unit: result.unit || '',
@@ -395,7 +405,43 @@ function App() {
           </section>
           {showInspector && <aside className="inspector">
             <div className="inspector-header"><div><b>Inspector</b><small>Configure workflow</small></div><button className="icon-button" onClick={() => setShowInspector(false)}><X size={17} /></button></div>
-            {selectedNode ? <div className="inspector-body"><div className="selected-type">SELECTED COMPONENT</div><h3>{selectedNode.data.label}</h3><p className="inspector-description">Configure the selected node and its processing behavior.</p><label>Node name</label><input className="field-input" value={selectedNode.data.label || ''} onChange={(e) => { const value = e.target.value; setNodes(ns => ns.map(n => n.id === selectedNode.id ? { ...n, data: { ...n.data, label: value } } : n)); setSelectedNode({ ...selectedNode, data: { ...selectedNode.data, label: value } }) }} /><label>Component ID</label><div className="read-only-field">{selectedNode.id}</div><label>Execution status</label><div className="status-field"><span className="tiny-dot green" /> Ready for execution</div><button className="delete-button" onClick={() => { setNodes(ns => ns.filter(n => n.id !== selectedNode.id)); setEdges(es => es.filter(e => e.source !== selectedNode.id && e.target !== selectedNode.id)); setSelectedNode(null) }}><Trash2 size={15} /> Remove node</button></div> : <div className="inspector-empty"><div className="empty-icon"><Cpu size={22} /></div><b>No node selected</b><p>Select a node on the canvas to view and edit its properties.</p><div className="tip-box"><Sparkles size={16} /><span><b>Quick tip</b> Connect nodes from left to right to define your data pipeline.</span></div></div>}
+            {selectedNode ? <div className="inspector-body">
+              <div className="selected-type">{selectedNode.type === 'sensorNode' ? 'DATA SOURCE' : selectedNode.type === 'filterNode' ? 'PROCESSING COMPONENT' : 'ACTION COMPONENT'}</div>
+              <h3>{selectedNode.data.label || 'Untitled node'}</h3>
+              <p className="inspector-description">Configure this component. Changes are reflected on the canvas and included when you compile the workflow.</p>
+              <label htmlFor="node-label">Node name</label>
+              <input id="node-label" className="field-input" value={selectedNode.data.label || ''} maxLength={80} onChange={(event) => updateSelectedNode({ label: event.target.value })} />
+
+              {selectedNode.type === 'sensorNode' && <>
+                <label htmlFor="sensor-device">Device ID</label>
+                <input id="sensor-device" className="field-input" value={selectedNode.data.deviceId || ''} maxLength={100} onChange={(event) => { const deviceId = event.target.value; updateSelectedNode({ deviceId, subtitle: `${selectedNode.data.metricName || 'vibration'} · ${deviceId || 'unassigned'}` }) }} />
+                <label htmlFor="sensor-metric">Metric name</label>
+                <input id="sensor-metric" className="field-input" value={selectedNode.data.metricName || ''} maxLength={80} onChange={(event) => { const metricName = event.target.value; updateSelectedNode({ metricName, subtitle: `${metricName || 'metric'} · ${selectedNode.data.deviceId || 'unassigned'}` }) }} />
+                <label htmlFor="sensor-unit">Unit</label>
+                <input id="sensor-unit" className="field-input" value={selectedNode.data.unit || ''} maxLength={24} onChange={(event) => updateSelectedNode({ unit: event.target.value })} />
+                <label htmlFor="sensor-status">Device status</label>
+                <select id="sensor-status" className="field-input" value={selectedNode.data.status || 'Waiting'} onChange={(event) => updateSelectedNode({ status: event.target.value })}><option>Connected</option><option>Waiting</option><option>Disconnected</option></select>
+              </>}
+
+              {selectedNode.type === 'filterNode' && <>
+                <label htmlFor="filter-window">Moving average window (samples)</label>
+                <input id="filter-window" className="field-input" type="number" min="1" max="10000" step="1" value={Number.parseInt(String(selectedNode.data.windowSize ?? selectedNode.data.window ?? '10').match(/\d+/)?.[0] || '10', 10)} onChange={(event) => { const windowSize = event.target.value; updateSelectedNode({ windowSize, window: `${windowSize || 1} samples`, subtitle: `Moving average · ${windowSize || 1} samples` }) }} />
+                <label>Processing operation</label>
+                <div className="read-only-field">Moving average</div>
+              </>}
+
+              {selectedNode.type === 'alertNode' && <>
+                <label htmlFor="alert-condition">Alert condition</label>
+                <input id="alert-condition" className="field-input" value={selectedNode.data.condition || ''} placeholder="Value > 50" maxLength={80} onChange={(event) => updateSelectedNode({ condition: event.target.value })} />
+                <label htmlFor="alert-message">Alert message</label>
+                <input id="alert-message" className="field-input" value={selectedNode.data.message || ''} placeholder="Threshold exceeded" maxLength={200} onChange={(event) => updateSelectedNode({ message: event.target.value })} />
+                <small className="inspector-help">Supported operators: &gt;, &gt;=, &lt;, &lt;=, ==, != followed by a number.</small>
+              </>}
+
+              <label>Component ID</label><div className="read-only-field">{selectedNode.id}</div>
+              <label>Execution status</label><div className="status-field"><span className="tiny-dot green" /> Ready for execution</div>
+              <button className="delete-button" onClick={() => { setNodes(ns => ns.filter(n => n.id !== selectedNode.id)); setEdges(es => es.filter(e => e.source !== selectedNode.id && e.target !== selectedNode.id)); setSelectedNode(null) }}><Trash2 size={15} /> Remove node</button>
+            </div> : <div className="inspector-empty"><div className="empty-icon"><Cpu size={22} /></div><b>No node selected</b><p>Select a node on the canvas to view and edit its properties.</p><div className="tip-box"><Sparkles size={16} /><span><b>Quick tip</b> Connect nodes from left to right to define your data pipeline.</span></div></div>}
             <div className="inspector-footer"><ShieldCheck size={15} /> Changes are saved locally</div>
           </aside>}
         </div> : activeTab === 'Live Preview' ? <div className="execution-panel">
@@ -419,7 +465,7 @@ function App() {
             <div className="metric-card"><div className="metric-top"><span>Socket connection</span><span className="metric-icon green"><Cloud size={16} /></span></div><div className="metric-value">{socketStatus === 'connected' ? 'Online' : socketStatus === 'connecting' ? '…' : 'Offline'}</div><p>Backend real-time channel</p></div>
             <div className="metric-card"><div className="metric-top"><span>Recent alerts</span><span className="metric-icon orange"><Bell size={16} /></span></div><div className="metric-value">{recentAlerts.toLocaleString()}</div><p>Alerts returned by the API + live events</p></div>
           </div>
-          <div className="chart-card"><div className="chart-header"><div><b>Live moving average</b><p>RxJS rolling average received from the backend</p></div><div className="chart-legend"><span><i /> {latestAverage?.metric || 'Sensor metric'}</span><b>{latestAverage ? latestAverage.value.toFixed(2) : '—'} <small>{latestAverage?.unit || 'units'}</small></b></div></div><div className="chart-wrap">{averageHistory.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={averageHistory}><defs><linearGradient id="vibrationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7888f6" stopOpacity={0.22}/><stop offset="100%" stopColor="#7888f6" stopOpacity={0.01}/></linearGradient></defs><CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#edf0f6"/><XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }}/><YAxis axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }} width={42}/><Tooltip contentStyle={{ border: '1px solid #e9edf5', borderRadius: 10, fontSize: 12 }}/><Area type="monotone" dataKey="value" stroke="#7888f6" strokeWidth={2.5} fill="url(#vibrationFill)" /></AreaChart></ResponsiveContainer> : <div className="execution-empty"><Activity size={22}/><b>Waiting for live telemetry</b><span>Post a reading to POST /api/telemetry to see its moving average here.</span></div>}</div></div>
+          <div className="chart-card"><div className="chart-header"><div><b>Live sensor telemetry</b><p>Raw sensor readings compared with the RxJS rolling average</p></div><div className="chart-legend"><span><i /> {latestAverage?.metric || 'Sensor metric'} · average + raw</span><b>{latestAverage ? latestAverage.value.toFixed(2) : '—'} <small>{latestAverage?.unit || 'units'}</small></b></div></div><div className="chart-wrap">{averageHistory.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={averageHistory}><defs><linearGradient id="vibrationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7888f6" stopOpacity={0.22}/><stop offset="100%" stopColor="#7888f6" stopOpacity={0.01}/></linearGradient></defs><CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#edf0f6"/><XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }}/><YAxis axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }} width={42}/><Tooltip contentStyle={{ border: '1px solid #e9edf5', borderRadius: 10, fontSize: 12 }}/><Area type="monotone" dataKey="value" name="Moving average" stroke="#7888f6" strokeWidth={2.5} fill="url(#vibrationFill)" /><Line type="monotone" dataKey="rawValue" name="Raw reading" stroke="#35b984" strokeWidth={1.7} dot={false} activeDot={{ r: 3 }} /></AreaChart></ResponsiveContainer> : <div className="execution-empty"><Activity size={22}/><b>Waiting for live telemetry</b><span>Post a reading to POST /api/telemetry to see its moving average here.</span></div>}</div></div>
         </section>
         <footer className="footer"><span>© 2026 NexusFlow · IoT Rule Engine</span><span><i /> API {socketStatus === 'connected' ? 'connected' : 'not connected'} <span className="footer-sep">·</span> v0.2.0</span></footer>
       </section>

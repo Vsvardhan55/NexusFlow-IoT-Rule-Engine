@@ -54,3 +54,7 @@
 
 /* Password visibility control on the authentication form */
 .auth-field>div .password-toggle{display:grid;place-items:center;flex:0 0 24px;width:24px;height:28px;padding:0;border:0;background:transparent;color:#929caf;cursor:pointer;border-radius:5px}.auth-field>div .password-toggle:hover{color:#6878e7;background:#f1f2ff}.auth-field>div .password-toggle:focus-visible{outline:2px solid #8994ed;outline-offset:2px}
+
+/* Inspector field guidance for the configurable node editor. */
+.inspector-help{display:block;margin-top:7px;color:#9aa3b5;font-size:8px;line-height:1.5}
+.inspector-body select.field-input{cursor:pointer}

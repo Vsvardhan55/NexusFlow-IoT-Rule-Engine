@@ -17,6 +17,7 @@ test('calculates a rolling average and drops values outside the configured windo
   assert.deepEqual(results.map(({ average }) => average), [10, 15, 20, 30])
   assert.equal(results.at(-1).sampleCount, 3)
   assert.equal(results.at(-1).windowSize, 3)
+  assert.equal(results.at(-1).rawValue, 40)
   subscription.unsubscribe()
 })
 
