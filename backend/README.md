@@ -99,3 +99,17 @@ Workflow alert nodes currently create persisted in-app alerts and Socket.IO even
 ## Live moving-average stream
 
 Every accepted telemetry reading is also processed by an RxJS rolling moving-average stream. Samples are grouped independently by `deviceId` and `metric`; the default rolling window is 10 samples and can be changed with `MOVING_AVERAGE_WINDOW` in the backend environment. The server broadcasts each result over Socket.IO as `telemetry:average` with `deviceId`, `metric`, `average`, `sampleCount`, `windowSize`, `unit`, and timestamps. The first result for each group is emitted immediately using the samples available so far.
+
+## Telemetry history and device inventory (20 Nov 2026)
+
+Authenticated dashboard clients can discover devices and query stored telemetry:
+
+- `GET /api/telemetry/devices` — returns device IDs, observed metrics, latest reading time, and reading counts.
+- `GET /api/telemetry/history?deviceId=sensor-01&metric=vibration&from=2026-11-20T00:00:00Z&to=2026-11-21T00:00:00Z&limit=100` — returns newest-first readings. `deviceId`, `metric`, `from`, and `to` are optional; `limit` is bounded to 1–500.
+
+## Persistent workflow execution monitoring (21 Nov 2026)
+
+- `GET /api/workflows/executions/recent?limit=50` — returns the newest workflow execution records across workflows (limit bounded to 1–200).
+- `GET /api/workflows/executions/summary` — returns total execution and triggered execution counts.
+
+Both endpoints require an authenticated session. The dashboard hydrates recent execution history from MongoDB on login and continues to append live Socket.IO execution events.

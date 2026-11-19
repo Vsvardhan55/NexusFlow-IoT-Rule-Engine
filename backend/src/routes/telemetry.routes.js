@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { getDatabase } from '../config/database.js'
 import { telemetrySubject } from '../services/telemetryPipeline.js'
+import { buildTelemetryQuery } from '../services/telemetryQuery.js'
 
 const router = Router()
 function normalizeReading(item) {
@@ -26,6 +27,35 @@ router.post('/', async (req, res, next) => {
     const result = await getDatabase().collection('telemetry').insertMany(documents, { ordered: false })
     documents.forEach((reading) => telemetrySubject.next(reading))
     res.status(201).json({ success: true, insertedCount: result.insertedCount, message: 'Telemetry stored and queued for rule evaluation.' })
+  } catch (error) { next(error) }
+})
+
+
+router.get('/devices', async (_req, res, next) => {
+  try {
+    const devices = await getDatabase().collection('telemetry').aggregate([
+      { $group: {
+        _id: '$metadata.deviceId',
+        latestSeen: { $max: '$timestamp' },
+        metrics: { $addToSet: '$metadata.metric' },
+        readingCount: { $sum: 1 },
+      } },
+      { $sort: { latestSeen: -1, _id: 1 } },
+      { $limit: 500 },
+      { $project: { _id: 0, deviceId: '$_id', latestSeen: 1, metrics: 1, readingCount: 1 } },
+    ]).toArray()
+    res.json({ success: true, count: devices.length, data: devices })
+  } catch (error) { next(error) }
+})
+
+router.get('/history', async (req, res, next) => {
+  try {
+    let query
+    try { query = buildTelemetryQuery(req.query) }
+    catch (error) { return res.status(400).json({ success: false, message: error.message }) }
+    const readings = await getDatabase().collection('telemetry')
+      .find(query.filter).sort(query.sort).limit(query.limit).toArray()
+    res.json({ success: true, count: readings.length, limit: query.limit, data: readings })
   } catch (error) { next(error) }
 })
 

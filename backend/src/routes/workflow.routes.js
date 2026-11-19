@@ -61,6 +61,26 @@ router.post('/:id/deactivate', async (req, res, next) => {
   } catch (error) { next(error) }
 })
 
+
+router.get('/executions/recent', async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(Number.parseInt(req.query.limit, 10) || 50, 1), 200)
+    const data = await getDatabase().collection('workflowExecutions')
+      .find({}).sort({ startedAt: -1 }).limit(limit).toArray()
+    res.json({ success: true, count: data.length, data })
+  } catch (error) { next(error) }
+})
+
+router.get('/executions/summary', async (_req, res, next) => {
+  try {
+    const [total, triggered] = await Promise.all([
+      getDatabase().collection('workflowExecutions').countDocuments(),
+      getDatabase().collection('workflowExecutions').countDocuments({ status: 'triggered' }),
+    ])
+    res.json({ success: true, data: { totalExecutions: total, triggeredExecutions: triggered } })
+  } catch (error) { next(error) }
+})
+
 router.get('/:id/executions', async (req, res, next) => {
   try {
     if (!ObjectId.isValid(req.params.id)) return res.status(400).json({ success: false, message: 'Invalid workflow ID.' })
