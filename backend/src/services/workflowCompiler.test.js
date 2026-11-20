@@ -37,3 +37,13 @@ test('rejects invalid alert conditions', () => {
   const nodes = graph.nodes.map((node) => node.id === 'alert-1' ? { ...node, data: { ...node.data, condition: 'whenever' } } : node)
   assert.throws(() => compileWorkflow({ ...graph, nodes }), /supported numeric threshold/)
 })
+
+
+test('uses metricName instead of the sensor display value', () => {
+  const nodes = graph.nodes.map((node) => node.id === 'sensor-1'
+    ? { ...node, data: { ...node.data, metric: 'Waiting for data', metricName: 'temperature' } }
+    : node)
+  const result = compileWorkflow({ ...graph, nodes })
+  assert.equal(result.executionPlan[0].config.metric, 'temperature')
+  assert.equal(result.executionPlan[0].config.deviceId, 'sensor-01')
+})

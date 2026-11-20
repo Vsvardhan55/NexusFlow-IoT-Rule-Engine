@@ -2,27 +2,15 @@ import { Router } from 'express'
 import { getDatabase } from '../config/database.js'
 import { telemetrySubject } from '../services/telemetryPipeline.js'
 import { buildTelemetryQuery } from '../services/telemetryQuery.js'
+import { normalizeReading } from '../services/telemetryReading.js'
 
 const router = Router()
-function normalizeReading(item) {
-  if (!item || typeof item !== 'object' || Array.isArray(item)) throw new Error('Each reading must be an object.')
-  const deviceId = String(item.deviceId || '').trim()
-  const metric = String(item.metric || 'value').trim()
-  const value = Number(item.value)
-  const timestamp = item.timestamp ? new Date(item.timestamp) : new Date()
-  if (!deviceId) throw new Error('Each reading must include deviceId.')
-  if (!metric) throw new Error('Each reading must include metric.')
-  if (!Number.isFinite(value)) throw new Error('Each reading must include a numeric value.')
-  if (Number.isNaN(timestamp.getTime())) throw new Error('timestamp must be a valid date.')
-  return { timestamp, metadata: { deviceId, metric, location: String(item.location || 'unspecified') }, value, unit: String(item.unit || ''), receivedAt: new Date() }
-}
-
 router.post('/', async (req, res, next) => {
   try {
     const payload = Array.isArray(req.body) ? req.body : [req.body]
     if (!payload.length || payload.length > 1000) return res.status(payload.length ? 413 : 400).json({ success: false, message: 'Submit between 1 and 1000 readings per request.' })
     let documents
-    try { documents = payload.map(normalizeReading) }
+    try { documents = payload.map((item) => normalizeReading(item)) }
     catch (error) { return res.status(400).json({ success: false, message: error.message }) }
     const result = await getDatabase().collection('telemetry').insertMany(documents, { ordered: false })
     documents.forEach((reading) => telemetrySubject.next(reading))

@@ -7,8 +7,11 @@ import { executeActiveWorkflows } from './workflowExecution.js'
 export const telemetrySubject = new Subject()
 
 export function startTelemetryPipeline(io) {
-  const subscription = telemetrySubject.subscribe(async (reading) => {
-    try {
+  // MongoDB writes and workflow evaluation are asynchronous. Serialize this
+  // portion of the pipeline so rapid readings cannot overtake one another.
+  let processing = Promise.resolve()
+  const subscription = telemetrySubject.subscribe((reading) => {
+    processing = processing.then(async () => {
       await executeActiveWorkflows(reading, io)
       const rules = await getDatabase().collection('rules').find({ enabled: true, 'condition.metric': reading.metadata.metric }).toArray()
       const matched = rules.filter((rule) => matchesRule(rule, reading))
@@ -25,9 +28,9 @@ export function startTelemetryPipeline(io) {
       }))
       await getDatabase().collection('alerts').insertMany(alerts)
       alerts.forEach((alert) => io.emit('alert:new', alert))
-    } catch (error) {
-      console.error('Rule evaluation failed:', error.message)
-    }
+    }).catch((error) => {
+      console.error('Telemetry rule/workflow processing failed:', error.message)
+    })
   })
 
   const configuredWindow = Number(process.env.MOVING_AVERAGE_WINDOW) || 10

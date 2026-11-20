@@ -52,12 +52,12 @@ export function compileWorkflow(graph) {
     const inputs = edges.filter((edge) => edge.target === id).map((edge) => edge.source)
     const data = node.data
     if (node.type === 'sensorNode') {
-      const value = Number(data.metric)
-      if (data.metric !== undefined && data.metric !== '' && !Number.isFinite(value)) fail(`Sensor node ${id} has an invalid numeric metric value.`)
+      // `data.metric` is the legacy canvas display value (for example 42.8),
+      // not the telemetry metric key. Prefer the explicit metricName field.
       const subtitle = String(data.subtitle || '')
       const inferredDeviceId = subtitle.includes('·') ? subtitle.split('·').pop().trim() : ''
       const inferredMetric = subtitle.includes('·') ? subtitle.split('·')[0].trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_') : ''
-      return { order: index + 1, nodeId: id, type: node.type, operation: 'read-telemetry', inputs, config: { name: String(data.label || 'Sensor'), metric: String(data.metricName || inferredMetric || 'vibration'), deviceId: String(data.deviceId || inferredDeviceId), value: Number.isFinite(value) ? value : null, unit: String(data.unit || '') } }
+      return { order: index + 1, nodeId: id, type: node.type, operation: 'read-telemetry', inputs, config: { name: String(data.label || 'Sensor'), metric: String(data.metricName || inferredMetric || 'vibration').trim().toLowerCase(), deviceId: String(data.deviceId || inferredDeviceId).trim(), unit: String(data.unit || '') } }
     }
     if (node.type === 'filterNode') {
       const windowSize = Number.parseInt(String(data.windowSize ?? data.window ?? '10').match(/\d+/)?.[0] || '10', 10)

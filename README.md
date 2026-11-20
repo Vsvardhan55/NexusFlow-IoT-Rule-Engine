@@ -25,3 +25,26 @@
 
 - Source files and archive structure were inspected after editing.
 - A full frontend lint/build could not be run in this packaging environment because `npm ci` did not complete before the environment timeout. Run `npm install`, `npm run lint`, and `npm run build` on the Windows development machine before committing.
+
+
+## Week 3 implementation (19–25 November 2026)
+
+This update strengthens the live telemetry path and adds a local device simulator.
+
+### Run a local telemetry simulation
+
+1. Start MongoDB and configure `backend/.env` from `backend/.env.example`.
+2. Start the API with `cd backend && npm install && npm run dev`.
+3. In another terminal, run `cd backend && npm run simulate`.
+4. Sign in to the frontend and open the live dashboard. The simulator posts vibration and temperature readings for `turbine-01` every second by default.
+
+Override simulator settings with `SIMULATOR_API_URL`, `SIMULATOR_INTERVAL_MS`, and `SIMULATOR_DEVICE_ID`. Stop it with Ctrl+C.
+
+### Week 3 reliability updates
+
+- Telemetry ingestion validation is isolated in a reusable, unit-tested service.
+- Workflow compilation now treats `metricName` as the sensor metric key and no longer mistakes the canvas display value for a required numeric input.
+- Asynchronous workflow and rule processing is serialized in arrival order to reduce out-of-order execution under burst traffic.
+- Moving-average and batched telemetry Socket.IO events continue to feed the dashboard.
+
+See `WORK_LOG_25_NOV_2026.md` for the implementation checklist and verification notes.
