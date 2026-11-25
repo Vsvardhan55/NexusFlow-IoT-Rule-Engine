@@ -113,18 +113,3 @@ Authenticated dashboard clients can discover devices and query stored telemetry:
 - `GET /api/workflows/executions/summary` — returns total execution and triggered execution counts.
 
 Both endpoints require an authenticated session. The dashboard hydrates recent execution history from MongoDB on login and continues to append live Socket.IO execution events.
-
-
-## Live telemetry simulator
-
-After the backend and MongoDB are running, open a second terminal in `backend/` and run:
-
-```bash
-npm run simulate
-```
-
-The simulator posts vibration (`mm/s`) and temperature (`°C`) readings for `turbine-01` to `POST /api/telemetry` every second. Stop with Ctrl+C. Configure `SIMULATOR_API_URL`, `SIMULATOR_INTERVAL_MS`, and `SIMULATOR_DEVICE_ID` in `.env` to customize it.
-
-## Week 3 processing notes
-
-Telemetry payload normalization lives in `src/services/telemetryReading.js` and is covered by unit tests. Live workflow/rule evaluation is serialized in `src/services/telemetryPipeline.js` so database-backed processing follows ingestion order. Workflow sensor compilation uses the configured `metricName` field (or a metric inferred from the node subtitle), not the numeric display value on the canvas.

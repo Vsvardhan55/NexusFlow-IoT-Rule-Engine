@@ -8,7 +8,7 @@ import {
   Activity, Bell, ChevronDown, CircleHelp, Cloud, Code2, Cpu, Database,
   Gauge, GitBranch, LayoutDashboard, Play, Plus, Radio, Save,
   Search, Settings2, ShieldCheck, SlidersHorizontal, Sparkles,
-  Zap, Clock3, CheckCircle2, X, Trash2, LogOut, Mail, LockKeyhole, UserRound, Eye, EyeOff
+  Zap, Clock3, CheckCircle2, X, Trash2, LogOut, Mail, LockKeyhole, UserRound, Eye, EyeOff, RefreshCw, Server,
 } from 'lucide-react'
 import {
   Area, AreaChart, CartesianGrid, Line, ResponsiveContainer, Tooltip, XAxis, YAxis
@@ -103,7 +103,7 @@ function AuthScreen({ onAuthenticated }) {
   const submit = async (event) => {
     event.preventDefault(); setError(''); setBusy(true)
     try {
-      const apiBase = (localStorage.getItem('nexusflow-api-url') || import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '')
+      const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '')
       let response
       try {
         response = await apiFetch(`${apiBase}/api/auth/${mode === 'login' ? 'login' : 'register'}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }) })
@@ -126,7 +126,7 @@ function AuthScreen({ onAuthenticated }) {
 
 // Main application navigation. This component was referenced by App but was
 // missing from the previous archive, which caused the runtime ReferenceError.
-function Sidebar({ alertCount = 0, user = null, currentPage = 'Rule Builder', onNavigate = () => {} }) {
+function Sidebar({ alertCount = 0, user = null, activePage, onNavigate }) {
   const primaryItems = [
     { label: 'Overview', icon: LayoutDashboard },
     { label: 'Rule Builder', icon: GitBranch },
@@ -134,26 +134,89 @@ function Sidebar({ alertCount = 0, user = null, currentPage = 'Rule Builder', on
     { label: 'Telemetry', icon: Activity },
     { label: 'Alerts', icon: Bell, count: alertCount },
   ]
+  const renderItem = ({ label, icon: Icon, count }) => <button key={label} type="button" className={`side-nav-item ${activePage === label ? 'active' : ''}`} aria-current={activePage === label ? 'page' : undefined} onClick={() => onNavigate(label)}>
+    <Icon size={16} /><span>{label}</span>{count > 0 && <span className="alert-count">{count > 99 ? '99+' : count}</span>}
+  </button>
   return <aside className="sidebar">
     <div className="brand"><div className="brand-mark"><Zap size={19} /></div><div><b>NexusFlow</b><small>VISUAL IOT PLATFORM</small></div></div>
     <div className="workspace-label">WORKSPACE <ChevronDown size={12} /></div>
     <div className="workspace-card"><div className="workspace-avatar">N</div><div><b>NexusFlow Project</b><small>Personal workspace</small></div><ChevronDown size={14} /></div>
     <div className="nav-section">BUILD & MONITOR</div>
-    <nav className="side-nav" aria-label="Main navigation">
-      {primaryItems.map(({ label, icon: Icon, count }) => <button type="button" key={label} className={currentPage === label ? 'active' : ''} aria-current={currentPage === label ? 'page' : undefined} onClick={() => onNavigate(label)}>
-        <Icon size={16} /><span>{label}</span>{count > 0 && <span className="alert-count">{count > 99 ? '99+' : count}</span>}
-      </button>)}
-    </nav>
+    <nav className="side-nav" aria-label="Main navigation">{primaryItems.map(renderItem)}</nav>
     <div className="nav-section lower">CONFIGURATION</div>
-    <nav className="side-nav" aria-label="Configuration">
-      <button type="button" className={currentPage === 'Data sources' ? 'active' : ''} onClick={() => onNavigate('Data sources')}><Database size={16} /><span>Data sources</span></button>
-      <button type="button" className={currentPage === 'Settings' ? 'active' : ''} onClick={() => onNavigate('Settings')}><Settings2 size={16} /><span>Settings</span></button>
-    </nav>
+    <nav className="side-nav" aria-label="Configuration">{renderItem({ label: 'Data sources', icon: Database })}{renderItem({ label: 'Settings', icon: Settings2 })}</nav>
     <div className="sidebar-bottom">
-      <div className="usage-card"><div className="usage-title"><span>Workspace usage</span><b>68%</b></div><div className="usage-track"><span /></div><small>Telemetry capacity used</small></div>
-      <div className="profile"><div className="profile-avatar">SV</div><div><b>{user?.name || 'Workspace member'}</b><small>{user?.email || 'Developer'}</small></div><Settings2 size={15} /></div>
+      <div className="usage-card"><div className="usage-title"><span>Workspace usage</span><b>Live</b></div><div className="usage-track"><span /></div><small>Telemetry capacity monitor</small></div>
+      <div className="profile"><div className="profile-avatar">{(user?.name || 'SV').split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase()}</div><div><b>{user?.name || 'Workspace member'}</b><small>{user?.email || 'Developer'}</small></div></div>
     </div>
   </aside>
+}
+
+function WorkspacePage({ page, user, onNavigate, onSignOut }) {
+  const [data, setData] = useState([])
+  const [stats, setStats] = useState({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
+  const apiBase = (import.meta.env.VITE_API_URL || 'http://localhost:5000').replace(/\/$/, '')
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
+    try {
+      const request = async (path) => {
+        const response = await apiFetch(`${apiBase}${path}`)
+        const result = await response.json().catch(() => ({}))
+        if (!response.ok || !result.success) throw new Error(result.message || `Request failed (${response.status})`)
+        return result
+      }
+      if (page === 'Overview') {
+        const [telemetry, devices, alerts, executions] = await Promise.all([
+          request('/api/telemetry/stats'), request('/api/telemetry/devices'), request('/api/alerts?limit=100'), request('/api/workflows/executions/summary'),
+        ])
+        setStats({ ...telemetry.data, deviceCount: devices.count, alertCount: alerts.count, ...executions.data })
+        setData(devices.data || [])
+      } else if (page === 'Devices' || page === 'Data sources') {
+        const result = await request('/api/telemetry/devices'); setData(result.data || []); setStats({ count: result.count })
+      } else if (page === 'Telemetry') {
+        const result = await request('/api/telemetry/history?limit=100'); setData(result.data || []); setStats({ count: result.count })
+      } else if (page === 'Alerts') {
+        const result = await request('/api/alerts?limit=100'); setData(result.data || []); setStats({ count: result.count })
+      }
+    } catch (err) { setError(err.message || 'Unable to load this workspace page.') }
+    finally { setLoading(false) }
+  }, [apiBase, page])
+  useEffect(() => {
+    const timer = window.setTimeout(() => { void load() }, 0)
+    return () => window.clearTimeout(timer)
+  }, [load, refreshKey])
+
+  const titleText = {
+    Overview: ['WORKSPACE SUMMARY', 'Overview', 'A live view of your IoT devices, telemetry and workflow activity.'],
+    Devices: ['DEVICE MANAGEMENT', 'Devices', 'Discover devices that have sent telemetry to your NexusFlow workspace.'],
+    Telemetry: ['LIVE DATA', 'Telemetry', 'Inspect the latest stored sensor readings from your time-series collection.'],
+    Alerts: ['EVENT MONITORING', 'Alerts', 'Review alert records generated by active workflow rules.'],
+    'Data sources': ['INGESTION CONFIGURATION', 'Data sources', 'Monitor connected sources and configure your telemetry publishers.'],
+    Settings: ['WORKSPACE CONFIGURATION', 'Settings', 'Review your session and local API connection configuration.'],
+  }[page]
+  const date = (value) => value ? new Date(value).toLocaleString() : '—'
+  const statCard = (label, value, icon) => <div className="workspace-stat" key={label}><span>{icon}</span><small>{label}</small><b>{Number(value || 0).toLocaleString()}</b></div>
+  return <div className="workspace-page">
+    <div className="page-heading workspace-page-heading"><div><div className="eyebrow"><span className="eyebrow-dot" /> {titleText[0]}</div><h1>{titleText[1]}</h1><p>{titleText[2]}</p></div><button className="secondary-button" onClick={() => setRefreshKey((key) => key + 1)}><RefreshCw size={15}/> Refresh</button></div>
+    {page === 'Overview' && <div className="workspace-stats">{statCard('Telemetry readings', stats.totalReadings, <Activity size={17}/>)}{statCard('Connected devices', stats.deviceCount, <Radio size={17}/>)}{statCard('Stored alerts', stats.alertCount, <Bell size={17}/>)}{statCard('Workflow executions', stats.totalExecutions, <GitBranch size={17}/>)}</div>}
+    {page === 'Settings' ? <div className="workspace-card-panel settings-panel"><div className="settings-row"><div className="settings-icon"><UserRound size={18}/></div><div><b>Signed-in account</b><p>{user?.name || 'Workspace member'} · {user?.email || 'No email available'}</p></div></div><div className="settings-row"><div className="settings-icon"><Server size={18}/></div><div><b>Backend API</b><p>{apiBase}</p><small>Configured using VITE_API_URL or the local development default.</small></div></div><div className="settings-row"><div className="settings-icon"><ShieldCheck size={18}/></div><div><b>Session security</b><p>Authenticated API requests use the current workspace session.</p></div></div><button className="danger-button" onClick={onSignOut}><LogOut size={15}/> Sign out</button></div> : null}
+    {page === 'Data sources' && <div className="workspace-card-panel source-guide"><h3>Telemetry ingestion endpoint</h3><p>Publishers can send sensor readings to the backend ingestion endpoint. Dashboard read access requires signing in.</p><code>POST {apiBase}/api/telemetry</code><pre>{JSON.stringify({ deviceId: 'turbine-01', metric: 'vibration', value: 42.8, unit: 'mm/s' }, null, 2)}</pre><p className="muted-note">Discovered devices appear below after their first telemetry reading is stored.</p></div>}
+    {page === 'Overview' && <div className="workspace-card-panel"><div className="section-title"><div><h3>Recently discovered devices</h3><p>Latest devices observed by the ingestion service.</p></div><button className="text-button" onClick={() => onNavigate('Devices')}>View all devices →</button></div><DataTable page="Devices" data={data.slice(0, 5)} date={date}/></div>}
+    {['Devices', 'Telemetry', 'Alerts', 'Data sources'].includes(page) && <div className="workspace-card-panel"><div className="section-title"><div><h3>{page === 'Devices' ? 'Registered devices' : page === 'Telemetry' ? 'Recent readings' : page === 'Alerts' ? 'Alert history' : 'Discovered data sources'}</h3><p>{stats.count ?? data.length} record{(stats.count ?? data.length) === 1 ? '' : 's'} returned by the API.</p></div></div>{page === 'Data sources' && <div className="source-table-spacer"/>}<DataTable page={page === 'Data sources' ? 'Devices' : page} data={data} date={date}/></div>}
+    {loading && <div className="workspace-state"><RefreshCw size={18}/> Loading {page.toLowerCase()}…</div>}
+    {error && <div className="workspace-error" role="alert"><b>Unable to load {page.toLowerCase()}</b><span>{error}</span><button className="secondary-button" onClick={() => setRefreshKey((key) => key + 1)}>Try again</button></div>}
+    <footer className="footer"><span>© 2026 NexusFlow · IoT Rule Engine</span><span><i/> {loading ? 'Refreshing' : error ? 'API unavailable' : 'Workspace page ready'}</span></footer>
+  </div>
+}
+
+function DataTable({ page, data, date }) {
+  if (!data.length) return <div className="workspace-empty">No {page.toLowerCase()} records found yet. Send telemetry or activate a workflow to populate this view.</div>
+  if (page === 'Devices') return <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Device ID</th><th>Metrics</th><th>Readings</th><th>Last seen</th><th>Status</th></tr></thead><tbody>{data.map((item) => <tr key={item.deviceId}><td><b>{item.deviceId}</b></td><td>{(item.metrics || []).join(', ') || '—'}</td><td>{(item.readingCount || 0).toLocaleString()}</td><td>{date(item.latestSeen)}</td><td><span className="table-status">Observed</span></td></tr>)}</tbody></table></div>
+  if (page === 'Telemetry') return <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Timestamp</th><th>Device</th><th>Metric</th><th>Value</th><th>Unit</th></tr></thead><tbody>{data.map((item, index) => <tr key={String(item._id || `${item.timestamp}-${index}`)}><td>{date(item.timestamp)}</td><td><b>{item.metadata?.deviceId || '—'}</b></td><td>{item.metadata?.metric || '—'}</td><td>{Number(item.value).toFixed(2)}</td><td>{item.unit || '—'}</td></tr>)}</tbody></table></div>
+  return <div className="table-scroll"><table className="workspace-table"><thead><tr><th>Triggered at</th><th>Rule / workflow</th><th>Device</th><th>Message</th><th>Value</th></tr></thead><tbody>{data.map((item, index) => <tr key={String(item._id || `${item.triggeredAt}-${index}`)}><td>{date(item.triggeredAt || item.timestamp)}</td><td><b>{item.workflowName || item.ruleName || item.ruleId || 'Alert'}</b></td><td>{item.deviceId || item.metadata?.deviceId || '—'}</td><td>{item.message || item.condition || item.description || 'Threshold condition matched'}</td><td>{item.value == null ? '—' : Number(item.value).toFixed(2)}</td></tr>)}</tbody></table></div>
 }
 
 function ExecutionDetails({ record }) {
@@ -166,128 +229,13 @@ function ExecutionDetails({ record }) {
   </div>
 }
 
-function WorkspacePage({ page, user, socketStatus, incomingEvents, recentAlerts, executionMetrics, onToast }) {
-  const [devices, setDevices] = useState([])
-  const [readings, setReadings] = useState([])
-  const [alerts, setAlerts] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
-  const [deviceFilter, setDeviceFilter] = useState('')
-  const [metricFilter, setMetricFilter] = useState('')
-  const [sampleDevice, setSampleDevice] = useState('sensor-demo-01')
-  const [sampleMetric, setSampleMetric] = useState('temperature')
-  const [sampleValue, setSampleValue] = useState('24.5')
-  const [sampleUnit, setSampleUnit] = useState('°C')
-  const [apiBase, setApiBase] = useState(() => localStorage.getItem('nexusflow-api-url') || import.meta.env.VITE_API_URL || 'http://localhost:5000')
-  const [savedMessage, setSavedMessage] = useState('')
-
-  const loadDevices = async () => {
-    const response = await apiFetch(`${apiBase.replace(/\/$/, '')}/api/telemetry/devices`)
-    const result = await response.json()
-    if (!response.ok || !result.success) throw new Error(result.message || 'Could not load devices')
-    setDevices(result.data || [])
-  }
-  const loadReadings = async () => {
-    const params = new URLSearchParams({ limit: '100' })
-    if (deviceFilter) params.set('deviceId', deviceFilter)
-    if (metricFilter) params.set('metric', metricFilter)
-    const response = await apiFetch(`${apiBase.replace(/\/$/, '')}/api/telemetry/history?${params}`)
-    const result = await response.json()
-    if (!response.ok || !result.success) throw new Error(result.message || 'Could not load telemetry history')
-    setReadings(result.data || [])
-  }
-  const loadAlerts = async () => {
-    const response = await apiFetch(`${apiBase.replace(/\/$/, '')}/api/alerts?limit=100`)
-    const result = await response.json()
-    if (!response.ok || !result.success) throw new Error(result.message || 'Could not load alerts')
-    setAlerts(result.data || [])
-  }
-  useEffect(() => {
-    let cancelled = false
-    const load = async () => {
-      setLoading(true); setError('')
-      try {
-        if (page === 'Overview' || page === 'Devices' || page === 'Data sources') await loadDevices()
-        if (page === 'Telemetry') { await loadDevices(); await loadReadings() }
-        if (page === 'Alerts') await loadAlerts()
-      } catch (err) { if (!cancelled) setError(err.message || 'Unable to load page data') }
-      finally { if (!cancelled) setLoading(false) }
-    }
-    load()
-    return () => { cancelled = true }
-    // page and filter changes intentionally trigger data refreshes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, deviceFilter, metricFilter, apiBase])
-
-  const sendSample = async (event) => {
-    event.preventDefault(); setSavedMessage('')
-    try {
-      const response = await fetch(`${apiBase.replace(/\/$/, '')}/api/telemetry`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceId: sampleDevice, metric: sampleMetric, value: Number(sampleValue), unit: sampleUnit }) })
-      const result = await response.json()
-      if (!response.ok || !result.success) throw new Error(result.message || 'Could not send sample')
-      setSavedMessage(`Successfully ingested ${result.insertedCount || 1} reading. Refresh telemetry to view it.`)
-      onToast('Sample telemetry sent')
-      if (page === 'Devices') await loadDevices()
-    } catch (err) { setError(err.message || 'Unable to send sample') }
-  }
-  const saveSettings = (event) => {
-    event.preventDefault()
-    const normalized = apiBase.trim().replace(/\/$/, '')
-    if (!/^https?:\/\//i.test(normalized)) { setError('API URL must start with http:// or https://'); return }
-    localStorage.setItem('nexusflow-api-url', normalized)
-    setApiBase(normalized); setError(''); setSavedMessage('API endpoint saved in this browser. Reload the app to apply it everywhere.')
-  }
-  const titleMap = {
-    Overview: ['Workspace overview', 'A live snapshot of your IoT workspace.'],
-    Devices: ['Connected devices', 'Discover devices that have submitted telemetry.'],
-    Telemetry: ['Telemetry explorer', 'Inspect historical sensor readings stored in MongoDB.'],
-    Alerts: ['Alert center', 'Review alert events generated by your workflows.'],
-    'Data sources': ['Data sources', 'Connect devices by publishing readings to the telemetry ingestion API.'],
-    Settings: ['Workspace settings', 'Manage your local workspace connection and account details.'],
-  }
-  const [title, description] = titleMap[page] || titleMap.Overview
-  const formatDate = (value) => value ? new Date(value).toLocaleString() : '—'
-  return <div className="workspace-page">
-    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> NEXUSFLOW WORKSPACE</div><h1>{title}</h1><p>{description}</p></div><button className="secondary-button" onClick={() => { setError(''); if (page === 'Alerts') loadAlerts().catch(e=>setError(e.message)); else if (page === 'Telemetry') loadReadings().catch(e=>setError(e.message)); else loadDevices().catch(e=>setError(e.message)) }}>Refresh data</button></div>
-    {error && <div className="workspace-error" role="alert">{error}</div>}
-    {savedMessage && <div className="workspace-success" role="status">{savedMessage}</div>}
-    {loading && <div className="workspace-loading">Loading workspace data…</div>}
-    {page === 'Overview' && <>
-      <div className="metric-grid workspace-metrics">
-        <div className="metric-card"><div className="metric-top"><span>Registered devices</span><span className="metric-icon blue"><Radio size={16}/></span></div><div className="metric-value">{devices.length}</div><p>Devices with stored readings</p></div>
-        <div className="metric-card"><div className="metric-top"><span>Telemetry readings</span><span className="metric-icon purple"><Activity size={16}/></span></div><div className="metric-value">{incomingEvents.toLocaleString()}</div><p>Total readings reported by API</p></div>
-        <div className="metric-card"><div className="metric-top"><span>Recent alerts</span><span className="metric-icon orange"><Bell size={16}/></span></div><div className="metric-value">{recentAlerts.toLocaleString()}</div><p>Alert records currently loaded</p></div>
-        <div className="metric-card"><div className="metric-top"><span>Workflow executions</span><span className="metric-icon green"><GitBranch size={16}/></span></div><div className="metric-value">{executionMetrics.totalExecutions.toLocaleString()}</div><p>{executionMetrics.triggeredExecutions.toLocaleString()} triggered</p></div>
-      </div>
-      <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Devices recently seen</h3><p>Latest devices reporting into NexusFlow</p></div></div><DeviceTable devices={devices.slice(0,8)} /></div>
-      <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Platform connection</h3><p>Real-time event channel status</p></div><span className={`connection-pill ${socketStatus === 'connected' ? 'online' : ''}`}>{socketStatus}</span></div></div>
-    </>}
-    {page === 'Devices' && <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Device registry</h3><p>{devices.length} device(s) discovered from telemetry records</p></div></div><DeviceTable devices={devices}/></div>}
-    {page === 'Telemetry' && <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Historical readings</h3><p>Latest 100 readings, newest first</p></div><div className="workspace-filters"><select value={deviceFilter} onChange={e=>setDeviceFilter(e.target.value)}><option value="">All devices</option>{devices.map(d=><option key={d.deviceId} value={d.deviceId}>{d.deviceId}</option>)}</select><input value={metricFilter} onChange={e=>setMetricFilter(e.target.value)} placeholder="Filter metric" /></div></div><div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Timestamp</th><th>Device</th><th>Metric</th><th>Value</th><th>Unit</th></tr></thead><tbody>{readings.map((r,i)=><tr key={r._id || `${r.timestamp}-${i}`}><td>{formatDate(r.timestamp)}</td><td>{r.metadata?.deviceId || '—'}</td><td>{r.metadata?.metric || '—'}</td><td>{r.value}</td><td>{r.unit || '—'}</td></tr>)}</tbody></table>{!readings.length && <div className="workspace-empty">No readings found. Try another filter or send a sample from Data sources.</div>}</div></div>}
-    {page === 'Alerts' && <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Recent alert events</h3><p>{alerts.length} alert record(s) returned by the API</p></div></div>{alerts.length ? <div className="workspace-list">{alerts.map((alert,i)=><article className="workspace-alert" key={alert._id || i}><span className="alert-symbol"><Bell size={17}/></span><div><b>{alert.title || alert.message || alert.ruleName || 'Workflow alert'}</b><p>{alert.message || alert.description || alert.condition || 'An alert event was recorded.'}</p><small>{formatDate(alert.triggeredAt || alert.createdAt)} · {alert.deviceId || alert.metadata?.deviceId || 'Device not specified'}</small></div><span className="history-status warning">Alert</span></article>)}</div> : <div className="workspace-empty">No alerts have been recorded yet.</div>}</div>}
-    {page === 'Data sources' && <>
-      <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Ingestion endpoint</h3><p>Send JSON readings to this endpoint. Device IDs appear in the registry after the first reading.</p></div><span className="connection-pill online">POST enabled</span></div><div className="endpoint-box"><code>{apiBase.replace(/\/$/, '')}/api/telemetry</code><span>Content-Type: application/json</span></div><pre className="sample-code">{`{\n  "deviceId": "sensor-demo-01",\n  "metric": "temperature",\n  "value": 24.5,\n  "unit": "°C"\n}`}</pre></div>
-      <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Send a test reading</h3><p>Publish a sample telemetry event to verify ingestion.</p></div></div><form className="workspace-form" onSubmit={sendSample}><label>Device ID<input required value={sampleDevice} onChange={e=>setSampleDevice(e.target.value)} /></label><label>Metric<input required value={sampleMetric} onChange={e=>setSampleMetric(e.target.value)} /></label><label>Value<input required type="number" step="any" value={sampleValue} onChange={e=>setSampleValue(e.target.value)} /></label><label>Unit<input value={sampleUnit} onChange={e=>setSampleUnit(e.target.value)} /></label><button className="primary-button" type="submit">Send test telemetry</button></form></div>
-      <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Discovered devices</h3><p>Devices that have sent at least one reading</p></div></div><DeviceTable devices={devices}/></div>
-    </>}
-    {page === 'Settings' && <>
-      <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>API connection</h3><p>Configure the backend URL used by this workspace.</p></div></div><form className="workspace-form settings-form" onSubmit={saveSettings}><label>Backend API base URL<input type="url" required value={apiBase} onChange={e=>setApiBase(e.target.value)} placeholder="http://localhost:5000" /></label><button className="primary-button" type="submit">Save API settings</button></form><p className="workspace-note">Current frontend default: {localStorage.getItem('nexusflow-api-url') || import.meta.env.VITE_API_URL || 'http://localhost:5000'}</p></div>
-      <div className="workspace-card-panel"><div className="workspace-panel-heading"><div><h3>Signed-in account</h3><p>Current authenticated workspace user</p></div></div><div className="account-details"><div><small>Name</small><b>{user?.name || 'Workspace member'}</b></div><div><small>Email</small><b>{user?.email || 'Not available'}</b></div><div><small>Session</small><b>Authenticated</b></div></div></div>
-    </>}
-  </div>
-}
-
-function DeviceTable({ devices }) {
-  return <div className="workspace-table-wrap"><table className="workspace-table"><thead><tr><th>Device ID</th><th>Metrics</th><th>Readings</th><th>Last seen</th><th>Status</th></tr></thead><tbody>{devices.map((device)=><tr key={device.deviceId}><td><b>{device.deviceId}</b></td><td>{(device.metrics || []).join(', ') || '—'}</td><td>{(device.readingCount || 0).toLocaleString()}</td><td>{device.latestSeen ? new Date(device.latestSeen).toLocaleString() : '—'}</td><td><span className="connection-pill online">Seen</span></td></tr>)}</tbody></table>{!devices.length && <div className="workspace-empty">No devices discovered yet. Publish a reading from Data sources to register a device.</div>}</div>
-}
-
 function App() {
   const [authToken, setAuthToken] = useState(() => localStorage.getItem('nexusflow-token') || '')
   const [currentUser, setCurrentUser] = useState(() => { try { return JSON.parse(localStorage.getItem('nexusflow-user') || 'null') } catch { return null } })
   const [nodes, setNodes, onNodesChange] = useNodesState(initialNodes)
   const [edges, setEdges, onEdgesChange] = useEdgesState(initialEdges)
   const [activeTab, setActiveTab] = useState('Builder')
-  const [currentPage, setCurrentPage] = useState('Rule Builder')
+  const [activePage, setActivePage] = useState('Rule Builder')
   const [selectedNode, setSelectedNode] = useState(null)
   const [running, setRunning] = useState(false)
   const [deployedWorkflowId, setDeployedWorkflowId] = useState('')
@@ -333,7 +281,7 @@ function App() {
 
   const compileWorkflow = async () => {
     try {
-      const apiBase = localStorage.getItem('nexusflow-api-url') || import.meta.env.VITE_API_URL || 'http://localhost:5000'
+      const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
       const response = await apiFetch(`${apiBase}/api/workflows`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -350,7 +298,7 @@ function App() {
     window.setTimeout(() => setToast(''), 3500)
   }
   const runWorkflow = async () => {
-    const apiBase = localStorage.getItem('nexusflow-api-url') || import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
     try {
       if (running) {
         if (deployedWorkflowId) {
@@ -379,7 +327,7 @@ function App() {
 
   useEffect(() => {
     if (!authToken) return undefined
-    const apiBase = localStorage.getItem('nexusflow-api-url') || import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
     let disposed = false
     let socket
     let script
@@ -443,7 +391,7 @@ function App() {
   // Connect the dashboard to the backend's real Socket.IO telemetry stream.
   useEffect(() => {
     if (!authToken) return undefined
-    const apiBase = localStorage.getItem('nexusflow-api-url') || import.meta.env.VITE_API_URL || 'http://localhost:5000'
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:5000'
     let socket
     let script
     let disposed = false
@@ -527,14 +475,13 @@ function App() {
     : averageHistory
   const visibleLatestAverage = visibleAverageHistory.at(-1) || (selectedDeviceFilter ? null : latestAverage)
   return <div className="app-shell">
-    <Sidebar alertCount={recentAlerts} user={currentUser} currentPage={currentPage} onNavigate={(page) => { setCurrentPage(page); setSelectedNode(null) }} />
+    <Sidebar alertCount={recentAlerts} user={currentUser} activePage={activePage} onNavigate={setActivePage} />
     <main className="main-area">
       <header className="topbar">
-        <div className="breadcrumb">Projects <span>/</span> <b>{currentPage}</b></div>
+        <div className="breadcrumb">Projects <span>/</span> <b>{activePage}</b></div>
         <div className="top-actions"><span className={`system-status ${socketStatus === 'connected' ? '' : 'system-status-offline'}`}><i /> {socketStatus === 'connected' ? 'Live telemetry connected' : socketStatus === 'connecting' ? 'Connecting telemetry…' : 'Telemetry disconnected'}</span><button className="icon-button"><CircleHelp size={18} /></button><button className="icon-button"><Bell size={18} /><i className="notification-dot" /></button><button className="top-avatar logout-button" title={`Sign out${currentUser?.name ? ` ${currentUser.name}` : ''}`} onClick={signOut}><LogOut size={15}/></button></div>
       </header>
-      <section className="page-content">
-        {currentPage === 'Rule Builder' ? <>
+      {activePage === 'Rule Builder' ? <section className="page-content">
         <div className="page-heading">
           <div><div className="eyebrow"><span className="eyebrow-dot" /> VISUAL AUTOMATION</div><h1>Rule Builder</h1><p>Design, connect, and deploy intelligent IoT workflows.</p></div>
           <div className="heading-actions"><button className="secondary-button" onClick={saveWorkflow}><Save size={16} /> Save draft</button><button className="secondary-button" onClick={compileWorkflow}><Code2 size={16} /> Compile</button><button className={`primary-button ${running ? 'is-running' : ''}`} onClick={runWorkflow}>{running ? <><Activity size={16} /> Stop simulation</> : <><Play size={16} fill="currentColor" /> Run workflow</>}</button></div>
@@ -627,9 +574,8 @@ function App() {
           </div>
           <div className="chart-card"><div className="chart-header"><div><b>Live sensor telemetry</b><p>Raw sensor readings compared with the RxJS rolling average</p></div><div className="chart-controls"><label className="device-filter-label" htmlFor="telemetry-device-filter">Device</label><select id="telemetry-device-filter" className="device-filter" value={selectedDeviceFilter} onChange={(event) => setSelectedDeviceFilter(event.target.value)}><option value="">All devices</option>{telemetryDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.deviceId}</option>)}</select><div className="chart-legend"><span><i /> {visibleLatestAverage?.metric || 'Sensor metric'} · average + raw</span><b>{visibleLatestAverage ? visibleLatestAverage.value.toFixed(2) : '—'} <small>{visibleLatestAverage?.unit || 'units'}</small></b></div></div></div><div className="chart-wrap">{visibleAverageHistory.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={visibleAverageHistory}><defs><linearGradient id="vibrationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7888f6" stopOpacity={0.22}/><stop offset="100%" stopColor="#7888f6" stopOpacity={0.01}/></linearGradient></defs><CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#edf0f6"/><XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }}/><YAxis axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }} width={42}/><Tooltip contentStyle={{ border: '1px solid #e9edf5', borderRadius: 10, fontSize: 12 }}/><Area type="monotone" dataKey="value" name="Moving average" stroke="#7888f6" strokeWidth={2.5} fill="url(#vibrationFill)" /><Line type="monotone" dataKey="rawValue" name="Raw reading" stroke="#35b984" strokeWidth={1.7} dot={false} activeDot={{ r: 3 }} /></AreaChart></ResponsiveContainer> : <div className="execution-empty"><Activity size={22}/><b>Waiting for live telemetry</b><span>Post a reading to POST /api/telemetry to see its moving average here.</span></div>}</div></div>
         </section>
-        <footer className="footer"><span>© 2026 NexusFlow · IoT Rule Engine</span><span><i /> API {socketStatus === 'connected' ? 'connected' : 'not connected'} <span className="footer-sep">·</span> v0.3.0</span></footer>
-        </> : <WorkspacePage page={currentPage} user={currentUser} socketStatus={socketStatus} incomingEvents={incomingEvents} recentAlerts={recentAlerts} executionMetrics={executionMetrics} onToast={setToast} />}
-      </section>
+        <footer className="footer"><span>© 2026 NexusFlow · IoT Rule Engine</span><span><i /> API {socketStatus === 'connected' ? 'connected' : 'not connected'} <span className="footer-sep">·</span> v0.2.0</span></footer>
+      </section> : <section className="page-content"><WorkspacePage page={activePage} user={currentUser} onNavigate={setActivePage} onSignOut={signOut}/></section>}
     </main>
     {toast && <div className="toast"><CheckCircle2 size={17} />{toast}</div>}
   </div>
