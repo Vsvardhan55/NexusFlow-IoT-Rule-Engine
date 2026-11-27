@@ -113,3 +113,7 @@ Authenticated dashboard clients can discover devices and query stored telemetry:
 - `GET /api/workflows/executions/summary` — returns total execution and triggered execution counts.
 
 Both endpoints require an authenticated session. The dashboard hydrates recent execution history from MongoDB on login and continues to append live Socket.IO execution events.
+
+### Telemetry pipeline diagnostics
+
+`GET /api/telemetry/pipeline` (authenticated) returns process-local counters for readings received, queued, currently processing, completed, and failed. It also includes the last processing timestamp and most recent error message. The RxJS DB-backed evaluation concurrency is controlled by `TELEMETRY_PROCESSING_CONCURRENCY` (default `8`, maximum `32`). These counters reset when the backend process restarts and are intended for live diagnostics, not durable reporting.

@@ -1,6 +1,6 @@
 import { Router } from 'express'
 import { getDatabase } from '../config/database.js'
-import { telemetrySubject } from '../services/telemetryPipeline.js'
+import { getTelemetryPipelineStats, telemetrySubject } from '../services/telemetryPipeline.js'
 import { buildTelemetryQuery } from '../services/telemetryQuery.js'
 
 const router = Router()
@@ -66,6 +66,10 @@ router.get('/latest', async (req, res, next) => {
     const readings = await getDatabase().collection('telemetry').find(query).sort({ timestamp: -1 }).limit(limit).toArray()
     res.json({ success: true, count: readings.length, data: readings })
   } catch (error) { next(error) }
+})
+
+router.get('/pipeline', (_req, res) => {
+  res.json({ success: true, data: getTelemetryPipelineStats() })
 })
 
 router.get('/stats', async (_req, res, next) => {

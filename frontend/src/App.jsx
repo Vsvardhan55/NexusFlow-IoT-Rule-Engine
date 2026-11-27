@@ -254,6 +254,7 @@ function App() {
   const [telemetryDevices, setTelemetryDevices] = useState([])
   const [selectedDeviceFilter, setSelectedDeviceFilter] = useState('')
   const [executionMetrics, setExecutionMetrics] = useState({ totalExecutions: 0, triggeredExecutions: 0 })
+  const [pipelineStats, setPipelineStats] = useState({ received: 0, processed: 0, failed: 0, queued: 0, inFlight: 0, lastProcessedAt: null, lastError: null })
 
   const onConnect = useCallback((params) => setEdges((eds) => addEdge({
     ...params, type: 'smoothstep', animated: true,
@@ -404,6 +405,12 @@ function App() {
       .then((response) => { if (!response.ok) throw new Error('Unable to load devices'); return response.json() })
       .then((result) => { if (!disposed && result.success) setTelemetryDevices(result.data || []) })
       .catch(() => {})
+    const refreshPipelineStats = () => apiFetch(`${apiBase}/api/telemetry/pipeline`)
+      .then((response) => { if (!response.ok) throw new Error('Unable to load pipeline metrics'); return response.json() })
+      .then((result) => { if (!disposed && result.success) setPipelineStats(result.data) })
+      .catch(() => {})
+    refreshPipelineStats()
+    const pipelineRefreshTimer = window.setInterval(refreshPipelineStats, 5000)
 
     apiFetch(`${apiBase}/api/alerts?limit=200`)
       .then((response) => response.json())
@@ -462,6 +469,7 @@ function App() {
 
     return () => {
       disposed = true
+      window.clearInterval(pipelineRefreshTimer)
       if (socket) socket.disconnect()
       if (script?.parentNode) script.parentNode.removeChild(script)
     }
@@ -570,6 +578,7 @@ function App() {
             <div className="metric-card"><div className="metric-top"><span>Incoming events</span><span className="metric-icon blue"><Activity size={16} /></span></div><div className="metric-value">{incomingEvents.toLocaleString()}</div><p>Stored telemetry readings</p></div>
             <div className="metric-card"><div className="metric-top"><span>Moving average</span><span className="metric-icon purple"><Gauge size={16} /></span></div><div className="metric-value">{latestAverage ? latestAverage.value.toFixed(2) : '—'} <small>{latestAverage?.unit || 'units'}</small></div><p>{latestAverage ? `${latestAverage.sampleCount} sample${latestAverage.sampleCount === 1 ? '' : 's'} in current window` : 'Waiting for telemetry stream'}</p></div>
             <div className="metric-card"><div className="metric-top"><span>Socket connection</span><span className="metric-icon green"><Cloud size={16} /></span></div><div className="metric-value">{socketStatus === 'connected' ? 'Online' : socketStatus === 'connecting' ? '…' : 'Offline'}</div><p>Backend real-time channel</p></div>
+            <div className="metric-card"><div className="metric-top"><span>Pipeline backlog</span><span className="metric-icon orange"><Server size={16} /></span></div><div className="metric-value">{pipelineStats.queued.toLocaleString()}</div><p>{pipelineStats.inFlight} processing · {pipelineStats.failed} failed</p></div>
             <div className="metric-card"><div className="metric-top"><span>Recent alerts</span><span className="metric-icon orange"><Bell size={16} /></span></div><div className="metric-value">{recentAlerts.toLocaleString()}</div><p>Alerts returned by the API + live events</p></div>
           </div>
           <div className="chart-card"><div className="chart-header"><div><b>Live sensor telemetry</b><p>Raw sensor readings compared with the RxJS rolling average</p></div><div className="chart-controls"><label className="device-filter-label" htmlFor="telemetry-device-filter">Device</label><select id="telemetry-device-filter" className="device-filter" value={selectedDeviceFilter} onChange={(event) => setSelectedDeviceFilter(event.target.value)}><option value="">All devices</option>{telemetryDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.deviceId}</option>)}</select><div className="chart-legend"><span><i /> {visibleLatestAverage?.metric || 'Sensor metric'} · average + raw</span><b>{visibleLatestAverage ? visibleLatestAverage.value.toFixed(2) : '—'} <small>{visibleLatestAverage?.unit || 'units'}</small></b></div></div></div><div className="chart-wrap">{visibleAverageHistory.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={visibleAverageHistory}><defs><linearGradient id="vibrationFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#7888f6" stopOpacity={0.22}/><stop offset="100%" stopColor="#7888f6" stopOpacity={0.01}/></linearGradient></defs><CartesianGrid strokeDasharray="3 4" vertical={false} stroke="#edf0f6"/><XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }}/><YAxis axisLine={false} tickLine={false} tick={{ fill: '#98a1b4', fontSize: 11 }} width={42}/><Tooltip contentStyle={{ border: '1px solid #e9edf5', borderRadius: 10, fontSize: 12 }}/><Area type="monotone" dataKey="value" name="Moving average" stroke="#7888f6" strokeWidth={2.5} fill="url(#vibrationFill)" /><Line type="monotone" dataKey="rawValue" name="Raw reading" stroke="#35b984" strokeWidth={1.7} dot={false} activeDot={{ r: 3 }} /></AreaChart></ResponsiveContainer> : <div className="execution-empty"><Activity size={22}/><b>Waiting for live telemetry</b><span>Post a reading to POST /api/telemetry to see its moving average here.</span></div>}</div></div>
